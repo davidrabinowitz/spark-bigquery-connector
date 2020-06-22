@@ -1,0 +1,27 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.google.cloud.spark</groupId>
+        <artifactId>spark-bigquery-parent</artifactId>
+        <version>1.6.2-SNAPSHOT</version>
+        <relativePath>spark-bigquery-parent</relativePath>
+    </parent>
+
+    <artifactId>spark-bigquery-reactor</artifactId>
+    <packaging>pom</packaging>
+    <name>Spark BigQuery Connector Reactor</name>
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <modules>
+        <module>bigquery-connector-common</module>
+        <module>spark-bigquery-connector-common</module>
+        <module>spark-bigquery</module>
+        <module>spark24-bigquery</module>
+    </modules>
+</project>
