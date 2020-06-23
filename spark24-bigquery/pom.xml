@@ -5,12 +5,11 @@
         <groupId>com.google.cloud.spark</groupId>
         <artifactId>spark-bigquery-parent</artifactId>
         <version>1.6.2-SNAPSHOT</version>
-        <relativePath>spark-bigquery-parent</relativePath>
+        <relativePath>../spark-bigquery-parent</relativePath>
     </parent>
 
-    <artifactId>spark-bigquery-reactor</artifactId>
-    <packaging>pom</packaging>
-    <name>Spark BigQuery Connector Reactor</name>
+    <artifactId>spark24-bigquery</artifactId>
+    <name>BigQuery Connector for Spark 2.4</name>
     <licenses>
         <license>
             <name>Apache License, Version 2.0</name>
@@ -18,10 +17,17 @@
             <distribution>repo</distribution>
         </license>
     </licenses>
-    <modules>
-        <module>bigquery-connector-common</module>
-        <module>spark-bigquery-connector-common</module>
-<!--        <module>spark-bigquery</module>-->
-        <module>spark24-bigquery</module>
-    </modules>
+    <dependencies>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>spark-bigquery-connector-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_2.11</artifactId>
+            <version>2.4.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
 </project>
