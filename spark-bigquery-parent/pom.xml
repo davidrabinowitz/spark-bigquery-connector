@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.google.cloud.spark</groupId>
     <artifactId>spark-bigquery-parent</artifactId>
-    <version>1.6.2-SNAPSHOT</version>
+    <version>0.16.2-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>Spark BigQuery Connector Build Parent</name>
     <licenses>
@@ -17,6 +17,7 @@
         <google-cloud-bom.version>0.129.0</google-cloud-bom.version>
         <grpc.version>1.30.0</grpc.version>
         <guava.version>29.0-jre</guava.version>
+        <netty.version>4.1.30.Final</netty.version>
         <protobuf.version>3.12.2</protobuf.version>
     </properties>
     <dependencyManagement>
@@ -49,6 +50,13 @@
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-bom</artifactId>
                 <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -90,6 +98,40 @@
                     <source>1.8</source>
                     <target>1.8</target>
                 </configuration>
+            </plugin>
+            <!--
+            <plugin>
+                <groupId>com.coveo</groupId>
+                <artifactId>fmt-maven-plugin</artifactId>
+                <version>2.9.1</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>format</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.1.1</version>
+                <configuration>
+                    <configLocation>google_checks.xml</configLocation>
+                    <consoleOutput>true</consoleOutput>
+                    <failsOnError>false</failsOnError>
+                    <linkXRef>false</linkXRef>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>validate</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
