@@ -24,6 +24,6 @@
         <module>spark-bigquery</module>
         <module>spark-bigquery-with-dependencies</module>
         <module>spark24-bigquery</module>
-<!--        <module>spark24-bigquery-with-dependencies</module>-->
+        <module>spark24-bigquery-with-dependencies</module>
     </modules>
 </project>
