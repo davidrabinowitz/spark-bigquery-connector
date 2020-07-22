@@ -20,8 +20,8 @@
     </licenses>
     <modules>
         <module>bigquery-connector-common</module>
-        <module>spark-bigquery-connector-common</module>
-        <module>spark-bigquery</module>
-        <module>spark24-bigquery</module>
+<!--        <module>spark-bigquery-connector-common</module>-->
+<!--        <module>spark-bigquery</module>-->
+<!--        <module>spark24-bigquery</module>-->
     </modules>
 </project>
