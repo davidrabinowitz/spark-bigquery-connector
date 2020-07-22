@@ -52,8 +52,8 @@ public class SparkBigQueryConfig implements BigQueryConfig {
   private static final String GCS_CONFIG_CREDENTIALS_FILE_PROPERTY =
       "google.cloud.auth.service.account.json.keyfile";
   private static final String GCS_CONFIG_PROJECT_ID_PROPERTY = "fs.gs.project.id";
-  private static final String INTERMEDIATE_FORMAT_OPTION = "intermediateFormat";
-  private static final String READ_DATA_FORMAT_OPTION = "readDataFormat";
+  public static final String INTERMEDIATE_FORMAT_OPTION = "intermediateFormat";
+  public static final String READ_DATA_FORMAT_OPTION = "readDataFormat";
   private static final ImmutableList<String> PERMITTED_READ_DATA_FORMATS =
       ImmutableList.of(DataFormat.ARROW.toString(), DataFormat.AVRO.toString());
   private static final ImmutableList<FormatOptions> PERMITTED_INTERMEDIATE_FORMATS =
