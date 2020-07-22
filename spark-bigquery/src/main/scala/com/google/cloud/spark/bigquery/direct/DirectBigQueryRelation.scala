@@ -25,8 +25,7 @@ import com.google.auth.Credentials
 import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions
 import com.google.cloud.bigquery.storage.v1.{BigQueryReadClient, BigQueryReadSettings, CreateReadSessionRequest, DataFormat, ReadSession}
 import com.google.cloud.bigquery.{BigQuery, BigQueryOptions, JobInfo, QueryJobConfiguration, Schema, StandardTableDefinition, TableDefinition, TableId, TableInfo}
-import com.google.cloud.spark.bigquery.direct.DirectBigQueryRelation.{compileFilter, compileValue, quote}
-import com.google.cloud.spark.bigquery.{BigQueryRelation, BigQueryUtil, BuildInfo, SchemaConverters, SparkBigQueryConnectorUserAgentProvider, SparkBigQueryOptions}
+import com.google.cloud.spark.bigquery.{BigQueryRelation, BigQueryUtil, SchemaConverters, SparkBigQueryConnectorUserAgentProvider, SparkBigQueryOptions}
 import com.google.common.cache.{Cache, CacheBuilder}
 import org.apache.spark.Partition
 import org.apache.spark.rdd.RDD

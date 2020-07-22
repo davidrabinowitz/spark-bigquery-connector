@@ -98,7 +98,7 @@ class BigQueryUtilsSuite extends org.scalatest.FunSuite {
   }
 
   test("ToIteratorTest") {
-    val path = new Path("connector/src/test/resources/ToIteratorTest")
+    val path = new Path("src/test/resources/ToIteratorTest")
     val fs = path.getFileSystem(new Configuration())
     var it = ToIterator(fs.listFiles(path, false))
 

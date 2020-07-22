@@ -15,6 +15,7 @@
  */
 package com.google.cloud.spark.bigquery
 
+import com.google.cloud.bigquery.connector.common.MockResponsesBatch
 import com.google.cloud.bigquery.storage.v1.{ReadRowsRequest, ReadRowsResponse}
 import com.google.cloud.spark.bigquery.direct.{ReadRowsClient, ReadRowsHelper}
 import io.grpc.{Status, StatusRuntimeException}
