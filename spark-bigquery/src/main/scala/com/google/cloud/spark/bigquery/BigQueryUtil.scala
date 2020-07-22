@@ -113,7 +113,7 @@ object BigQueryUtil {
     val runtimeScalaVersion = trimVersion(scala.util.Properties.versionNumberString)
     val buildProperties = new Properties
     buildProperties.load(getClass.getResourceAsStream("/spark-bigquery-connector.properties"))
-    val connectorScalaVersion = trimVersion(buildProperties.getProperty("scala.version"))
+    val connectorScalaVersion = buildProperties.getProperty("scala.version")
     if (!runtimeScalaVersion.equals(connectorScalaVersion)) {
       throw new IllegalStateException(
         s"""

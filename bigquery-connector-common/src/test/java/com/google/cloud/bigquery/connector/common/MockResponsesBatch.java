@@ -21,14 +21,14 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Queue;
 
-class MockResponsesBatch implements Iterator<ReadRowsResponse> {
+public class MockResponsesBatch implements Iterator<ReadRowsResponse> {
   private Queue<Object> responses = new LinkedList<>();
 
-  void addResponse(ReadRowsResponse response) {
+  public void addResponse(ReadRowsResponse response) {
     responses.add(response);
   }
 
-  void addException(RuntimeException exception) {
+  public void addException(RuntimeException exception) {
     responses.add(exception);
   }
 
