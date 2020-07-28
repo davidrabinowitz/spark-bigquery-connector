@@ -14,14 +14,25 @@
         </license>
     </licenses>
     <properties>
-        <google-cloud-bom.version>0.130.0</google-cloud-bom.version>
-        <grpc.version>1.30.0</grpc.version>
+        <google-cloud-bigquerystorage.version>1.2.1</google-cloud-bigquerystorage.version>
+        <google-cloud-bom.version>0.131.0</google-cloud-bom.version>
+        <grpc.version>1.30.2</grpc.version>
         <guava.version>29.0-jre</guava.version>
         <netty.version>4.1.48.Final</netty.version>
         <protobuf.version>3.12.2</protobuf.version>
+
+        <!-- checkstyle -->
+        <checkstyle.header.file></checkstyle.header.file>
     </properties>
     <dependencyManagement>
         <dependencies>
+           <dependency>
+                <groupId>com.google.cloud</groupId>
+                <artifactId>google-cloud-bigquerystorage-bom</artifactId>
+                <version>${google-cloud-bigquerystorage.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>com.google.cloud</groupId>
                 <artifactId>google-cloud-bom</artifactId>
