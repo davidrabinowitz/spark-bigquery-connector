@@ -17,7 +17,7 @@ package com.google.cloud.spark.bigquery.direct
 
 import com.google.api.gax.rpc.ServerStreamingCallable
 import com.google.cloud.bigquery.connector.common.BigQueryUtil
-import com.google.cloud.bigquery.storage.v1.{BigQueryReadClient, DataFormat, ReadRowsRequest, ReadRowsResponse, ReadSession, ReadStream}
+import com.google.cloud.bigquery.storage.v1._
 import com.google.cloud.bigquery.{BigQuery, Schema}
 import com.google.cloud.spark.bigquery.{ArrowBinaryIterator, AvroBinaryIterator, SparkBigQueryConfig}
 import com.google.protobuf.ByteString
@@ -76,15 +76,16 @@ class BigQueryRDD(sc: SparkContext,
 /**
  * A converter for transforming an iterator on ReadRowsResponse to an iterator
  * that converts each of these rows to Arrow Schema
- * @param columnsInOrder Ordered columns in the Big Query schema
- * @param rawArrowSchema Schema representation in arrow format
+ *
+ * @param columnsInOrder      Ordered columns in the Big Query schema
+ * @param rawArrowSchema      Schema representation in arrow format
  * @param rowResponseIterator Iterator over rows read from big query
  */
 case class ArrowConverter(columnsInOrder: Seq[String],
-                          rawArrowSchema : ByteString,
-                          rowResponseIterator : Iterator[ReadRowsResponse])
-{
+                          rawArrowSchema: ByteString,
+                          rowResponseIterator: Iterator[ReadRowsResponse]) extends Logging {
   def getIterator(): Iterator[InternalRow] = {
+    logWarning(s"arrow getit")
     rowResponseIterator.flatMap(readRowResponse =>
       new ArrowBinaryIterator(columnsInOrder.asJava,
         rawArrowSchema,
@@ -95,28 +96,32 @@ case class ArrowConverter(columnsInOrder: Seq[String],
 /**
  * A converter for transforming an iterator on ReadRowsResponse to an iterator
  * that converts each of these rows to Avro Schema
- * @param bqSchema Schema of underlying big query source
- * @param columnsInOrder Ordered columns in the Big Query schema
- * @param rawAvroSchema Schema representation in Avro format
+ *
+ * @param bqSchema            Schema of underlying big query source
+ * @param columnsInOrder      Ordered columns in the Big Query schema
+ * @param rawAvroSchema       Schema representation in Avro format
  * @param rowResponseIterator Iterator over rows read from big query
  */
-case class AvroConverter (bqSchema: Schema,
-                 columnsInOrder: Seq[String],
-                 rawAvroSchema: String,
-                 rowResponseIterator : Iterator[ReadRowsResponse])
-{
+case class AvroConverter(bqSchema: Schema,
+                         columnsInOrder: Seq[String],
+                         rawAvroSchema: String,
+                         rowResponseIterator: Iterator[ReadRowsResponse]) extends Logging {
   @transient private lazy val avroSchema = new AvroSchema.Parser().parse(rawAvroSchema)
 
-  def getIterator(): Iterator[InternalRow] =
-  {
+  def getIterator(): Iterator[InternalRow] = {
+    logWarning(s"avro getit")
     rowResponseIterator.flatMap(toRows)
   }
 
-  def toRows(response: ReadRowsResponse): Iterator[InternalRow] = new AvroBinaryIterator(
-    bqSchema,
-    columnsInOrder.asJava,
-    avroSchema,
-    response.getAvroRows.getSerializedBinaryRows).asScala
+  def toRows(response: ReadRowsResponse): Iterator[InternalRow] = {
+    logWarning(s"avro torows")
+    new AvroBinaryIterator(
+      bqSchema,
+      columnsInOrder.asJava,
+      avroSchema,
+      response.getAvroRows.getSerializedBinaryRows).asScala
+  }
+
 }
 
 case class BigQueryPartition(stream: String, index: Int) extends Partition
@@ -134,20 +139,42 @@ case class ReadRowsClientWrapper(client: BigQueryReadClient)
   override def close: Unit = client.close
 }
 
-class ReadRowsIterator (val helper: ReadRowsHelper,
-                        var serverResponses: java.util.Iterator[ReadRowsResponse] )
+class ReadRowsIterator(val helper: ReadRowsHelper,
+                       var serverResponses: java.util.Iterator[ReadRowsResponse])
   extends Logging with Iterator[ReadRowsResponse] {
   var readRowsCount: Long = 0
   var retries: Int = 0
+  var lastCallTime: Long = -1;
 
-  override def hasNext: Boolean = serverResponses.hasNext
+  override def hasNext: Boolean = {
+    if (lastCallTime > 0) {
+      val currentTime = System.currentTimeMillis()
+      logWarning(
+        s"""
+           |time between hasNext calls:  ${currentTime - lastCallTime}
+           """
+          .stripMargin.replace('\n', ' ').trim)
+    }
+
+    val startTime = System.currentTimeMillis()
+    val hasNextVariable = serverResponses.hasNext
+    val endTime = System.currentTimeMillis()
+    logWarning(
+      s"""
+         |time of hasNext call:  ${endTime - startTime}
+       """
+        .stripMargin.replace('\n', ' ').trim)
+
+    lastCallTime = System.currentTimeMillis()
+    return hasNextVariable;
+  }
 
   override def next(): ReadRowsResponse = {
     do {
       try {
         val response = serverResponses.next
         readRowsCount += response.getRowCount
-        logDebug(s"read ${response.getSerializedSize} bytes")
+        logWarning(s"read ${response.getSerializedSize} bytes")
         return response
       } catch {
         case e: Exception =>
@@ -170,8 +197,9 @@ case class ReadRowsHelper(
                            client: ReadRowsClient,
                            request: ReadRowsRequest.Builder,
                            maxReadRowsRetries: Int
-                         )  {
+                         ) extends Logging {
   def readRows(): Iterator[ReadRowsResponse] = {
+    logWarning(s"readrowhelper")
     val serverResponses = fetchResponses(request)
     new ReadRowsIterator(this, serverResponses)
   }
@@ -181,8 +209,8 @@ case class ReadRowsHelper(
   java.util.Iterator[
     ReadRowsResponse] =
     client.readRowsCallable
-    .call(readRowsRequest.build)
-    .iterator
+      .call(readRowsRequest.build)
+      .iterator
 
 }
 
