@@ -25,18 +25,25 @@ import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import com.google.protobuf.Message;
-import org.apache.log4j.Level;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.catalyst.util.ArrayData;
-import org.apache.spark.sql.types.*;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.DecimalType;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import org.apache.spark.unsafe.types.UTF8String;
 import org.junit.AssumptionViolatedException;
 import org.junit.Test;
 
-import static com.google.cloud.spark.bigquery.ProtobufUtils.*;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.buildDescriptorProtoWithFields;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.buildSingleRowMessage;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.toDescriptor;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.toProtoRows;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.toProtoSchema;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
@@ -46,8 +53,14 @@ public class ProtobufUtilsTest {
   // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#numeric-type
   private static final int BQ_NUMERIC_PRECISION = 38;
   private static final int BQ_NUMERIC_SCALE = 9;
+  // Numeric is a fixed precision Decimal Type with 76 digits of precision and 9 digits of scale.
+  // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#bignumeric-type
+  private static final int BQ_BIG_NUMERIC_PRECISION = 76;
+  private static final int BQ_BIG_NUMERIC_SCALE = 9;
   private static final DecimalType NUMERIC_SPARK_TYPE =
       DataTypes.createDecimalType(BQ_NUMERIC_PRECISION, BQ_NUMERIC_SCALE);
+  private static final DecimalType BIG_NUMERIC_SPARK_TYPE =
+      DataTypes.createDecimalType(BQ_BIG_NUMERIC_PRECISION, BQ_BIG_NUMERIC_SCALE);
   // The maximum nesting depth of a BigQuery RECORD:
   private static final int MAX_BIGQUERY_NESTED_DEPTH = 15;
 

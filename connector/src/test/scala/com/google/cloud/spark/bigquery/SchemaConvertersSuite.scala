@@ -45,6 +45,7 @@ class SchemaConvertersSuite extends org.scalatest.FunSuite {
       Field.newBuilder("binary_arr", BYTES).setMode(Mode.REPEATED).build(),
       Field.of("float", FLOAT),
       Field.of("numeric", NUMERIC),
+      Field.of("bignumeric", BIGNUMERIC),
       Field.of("date", DATE),
       Field.of("times", RECORD,
         Field.of("time", TIME),
@@ -58,6 +59,7 @@ class SchemaConvertersSuite extends org.scalatest.FunSuite {
       StructField("binary_arr", ArrayType(BinaryType, containsNull = true)),
       StructField("float", DoubleType),
       StructField("numeric", DataTypes.createDecimalType(38, 9)),
+      StructField("bignumeric", DataTypes.createDecimalType(76, 9)),
       StructField("date", DateType),
       StructField("times", StructType(Seq(
         StructField("time", LongType),

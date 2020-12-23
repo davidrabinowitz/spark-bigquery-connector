@@ -177,7 +177,8 @@ public class ProtobufUtils {
     }
     if (LegacySQLTypeName.GEOGRAPHY.equals(bqType)
         || LegacySQLTypeName.BYTES.equals(bqType)
-        || LegacySQLTypeName.NUMERIC.equals(bqType)) {
+        || LegacySQLTypeName.NUMERIC.equals(bqType)
+        || LegacySQLTypeName.BIGNUMERIC.equals(bqType)) {
       return DescriptorProtos.FieldDescriptorProto.Type.TYPE_BYTES;
     }
     if (LegacySQLTypeName.FLOAT.equals(bqType)) {

@@ -23,6 +23,7 @@ import org.apache.spark.sql.types._
 
 object TestConstants {
   private val BQ_NUMERIC = DataTypes.createDecimalType(38, 9)
+  private val BQ_BIG_NUMERIC = DataTypes.createDecimalType(76, 9)
 
   val ALL_TYPES_TABLE_SCHEMA = StructType(Seq(
     StructField("int_req", LongType, nullable = false),
@@ -41,6 +42,13 @@ object TestConstants {
         StructField("max", BQ_NUMERIC, nullable = true),
         StructField("pi", BQ_NUMERIC, nullable = true),
         StructField("big_pi", BQ_NUMERIC, nullable = true))),
+      nullable = true),
+    StructField("bignums",
+      StructType(Seq(
+        StructField("min", BQ_BIG_NUMERIC, nullable = true),
+        StructField("max", BQ_BIG_NUMERIC, nullable = true),
+        StructField("pi", BQ_BIG_NUMERIC, nullable = true),
+        StructField("big_pi", BQ_BIG_NUMERIC, nullable = true))),
       nullable = true),
     StructField("int_arr", ArrayType(LongType, containsNull = true), nullable = true),
     StructField("int_struct_arr", ArrayType(
@@ -62,6 +70,7 @@ object TestConstants {
       |binary bytes,
       |float float64,
       |nums struct<min numeric, max numeric, pi numeric, big_pi numeric>,
+      |bignums struct<min bignumeric, max bignumeric, pi bignumeric, big_pi bignumeric>,
       |int_arr array<int64>,
       |int_struct_arr array<struct<i int64>>
       |) as
@@ -83,6 +92,12 @@ object TestConstants {
       |  cast(3.14 as numeric) as pi,
       |  cast("31415926535897932384626433832.795028841" as numeric) as big_pi
       |) as nums,
+      |struct(
+      |  cast("-99999999999999999999999999999.999999999" as bignumeric) as min,
+      |  cast("99999999999999999999999999999.999999999" as bignumeric) as max,
+      |  cast(3.14 as bignumeric) as pi,
+      |  cast("31415926535897932384626433832.795028841" as bignumeric) as big_pi
+      |) as bignums,
       |[1, 2, 3] as int_arr,
       |[(select as struct 1)] as int_struct_arr
     """.stripMargin
@@ -105,6 +120,11 @@ object TestConstants {
       lit("99999999999999999999999999999.999999999").cast(BQ_NUMERIC),
       lit(3.14).cast(BQ_NUMERIC),
       lit("31415926535897932384626433832.795028841").cast(BQ_NUMERIC)),
+    struct(
+      lit("-99999999999999999999999999999.999999999").cast(BQ_BIG_NUMERIC),
+      lit("99999999999999999999999999999.999999999").cast(BQ_BIG_NUMERIC),
+      lit(3.14).cast(BQ_BIG_NUMERIC),
+      lit("31415926535897932384626433832.795028841").cast(BQ_BIG_NUMERIC)),
     array(lit(1), lit(2), lit(3)),
     array(struct(lit(1)))
   )

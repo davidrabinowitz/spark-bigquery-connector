@@ -40,8 +40,14 @@ public class SchemaConverters {
   // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#numeric-type
   static final int BQ_NUMERIC_PRECISION = 38;
   static final int BQ_NUMERIC_SCALE = 9;
-  private static final DecimalType NUMERIC_SPARK_TYPE =
+  static final DecimalType NUMERIC_SPARK_TYPE =
       DataTypes.createDecimalType(BQ_NUMERIC_PRECISION, BQ_NUMERIC_SCALE);
+  // Numeric is a fixed precision Decimal Type with 38 digits of precision and 9 digits of scale.
+  // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#bignumeric-type
+  static final int BQ_BIG_NUMERIC_PRECISION = 76;
+  static final int BQ_BIG_NUMERIC_SCALE = 9;
+  static final DecimalType BIG_NUMERIC_SPARK_TYPE =
+      DataTypes.createDecimalType(BQ_BIG_NUMERIC_PRECISION, BQ_BIG_NUMERIC_SCALE);
   // The maximum nesting depth of a BigQuery RECORD:
   static final int MAX_BIGQUERY_NESTED_DEPTH = 15;
   static final String MAPTYPE_ERROR_MESSAGE = "MapType is unsupported.";
@@ -113,6 +119,14 @@ public class SchemaConverters {
       byte[] bytes = getBytes((ByteBuffer) value);
       BigDecimal b = new BigDecimal(new BigInteger(bytes), BQ_NUMERIC_SCALE);
       Decimal d = Decimal.apply(b, BQ_NUMERIC_PRECISION, BQ_NUMERIC_SCALE);
+
+      return d;
+    }
+
+    if (LegacySQLTypeName.BIGNUMERIC.equals(field.getType())) {
+      byte[] bytes = getBytes((ByteBuffer) value);
+      BigDecimal b = new BigDecimal(new BigInteger(bytes), BQ_BIG_NUMERIC_SCALE);
+      Decimal d = Decimal.apply(b, BQ_BIG_NUMERIC_PRECISION, BQ_BIG_NUMERIC_SCALE);
 
       return d;
     }
@@ -204,6 +218,8 @@ public class SchemaConverters {
       return DataTypes.DoubleType;
     } else if (LegacySQLTypeName.NUMERIC.equals(field.getType())) {
       return NUMERIC_SPARK_TYPE;
+    } else if (LegacySQLTypeName.BIGNUMERIC.equals(field.getType())) {
+      return BIG_NUMERIC_SPARK_TYPE;
     } else if (LegacySQLTypeName.STRING.equals(field.getType())) {
       return DataTypes.StringType;
     } else if (LegacySQLTypeName.BOOLEAN.equals(field.getType())) {
@@ -306,9 +322,13 @@ public class SchemaConverters {
     }
     if (elementType instanceof DecimalType) {
       DecimalType decimalType = (DecimalType) elementType;
-      if (decimalType.precision() <= BQ_NUMERIC_PRECISION
-          && decimalType.scale() <= BQ_NUMERIC_SCALE) {
+
+      if (decimalType.scale() <= BQ_NUMERIC_SCALE
+          && decimalType.precision() <= BQ_NUMERIC_PRECISION) {
         return LegacySQLTypeName.NUMERIC;
+      } else if (decimalType.scale() <= BQ_BIG_NUMERIC_SCALE
+          && decimalType.precision() <= BQ_BIG_NUMERIC_PRECISION) {
+        return LegacySQLTypeName.BIGNUMERIC;
       } else {
         throw new IllegalArgumentException(
             "Decimal type is too wide to fit in BigQuery Numeric format");

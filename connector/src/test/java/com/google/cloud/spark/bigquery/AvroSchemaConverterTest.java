@@ -215,6 +215,41 @@ public class AvroSchemaConverterTest {
   }
 
   @Test
+  public void testConvertBigNumeric() {
+    InternalRow row =
+        new GenericInternalRow(
+            new Object[] {
+              Decimal.apply(
+                  BigDecimal.valueOf(123.456), SchemaConverters.BQ_BIG_NUMERIC_PRECISION, 3)
+            });
+    StructType sparkSchema =
+        DataTypes.createStructType(
+            ImmutableList.of(
+                DataTypes.createStructField(
+                    "decimal_f",
+                    DataTypes.createDecimalType(SchemaConverters.BQ_BIG_NUMERIC_PRECISION, 3),
+                    false)));
+
+    Schema avroSchema =
+        SchemaBuilder.record("root")
+            .fields() //
+            .name("decimal_f")
+            .type(decimal("decimal_f"))
+            .noDefault() //
+            .endRecord();
+    GenericData.Record result =
+        AvroSchemaConverter.sparkRowToAvroGenericData(row, sparkSchema, avroSchema);
+    assertThat(result.getSchema()).isEqualTo(avroSchema);
+    Conversions.DecimalConversion decimalConversion = new Conversions.DecimalConversion();
+    assertThat(
+            decimalConversion.fromBytes(
+                (ByteBuffer) result.get(0),
+                avroSchema.getField("decimal_f").schema(),
+                LogicalTypes.decimal(SchemaConverters.BQ_BIG_NUMERIC_PRECISION, 3)))
+        .isEqualTo(BigDecimal.valueOf(123.456));
+  }
+
+  @Test
   public void testConvertDoubles() {
     InternalRow row =
         new GenericInternalRow(new Object[] {Float.valueOf("0.0"), Double.valueOf("1.1")});
@@ -268,9 +303,7 @@ public class AvroSchemaConverterTest {
   }
 
   @Test
-  public void testComparisonToSparkAvro() {
-
-  }
+  public void testComparisonToSparkAvro() {}
 
   private void checkField(Schema.Field field, String name, Schema schema) {
     assertThat(field.name()).isEqualTo(name);

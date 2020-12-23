@@ -15,24 +15,28 @@
  */
 package com.google.cloud.spark.bigquery.v2;
 
-import com.google.cloud.bigquery.*;
+import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.LegacySQLTypeName;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.StandardTableDefinition;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
-import com.google.cloud.bigquery.storage.v1.StreamStats;
 import com.google.cloud.spark.bigquery.ReadRowsResponseToInternalRowIteratorConverter;
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.TextFormat;
-import org.apache.log4j.Logger;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.junit.Test;
 
 import java.util.Iterator;
 
-import static com.google.common.truth.Truth.*;
+import static com.google.common.truth.Truth.assertThat;
 
 public class BigQueryInputPartitionReaderTest {
 
   private static final String ALL_TYPES_TABLE_AVRO_RAW_SCHEMA =
-      "{\"type\":\"record\",\"name\":\"__root__\",\"fields\":[{\"name\":\"string_f\",\"type\":[\"null\",\"string\"]},{\"name\":\"bytes_f\",\"type\":[\"null\",\"bytes\"]},{\"name\":\"int_f\",\"type\":[\"null\",\"long\"]},{\"name\":\"float_f\",\"type\":[\"null\",\"double\"]},{\"name\":\"numeric_f\",\"type\":[\"null\",{\"type\":\"bytes\",\"logicalType\":\"decimal\",\"precision\":38,\"scale\":9}]},{\"name\":\"boolean_f\",\"type\":[\"null\",\"boolean\"]},{\"name\":\"timestamp_f\",\"type\":[\"null\",{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"}]},{\"name\":\"date_f\",\"type\":[\"null\",{\"type\":\"int\",\"logicalType\":\"date\"}]},{\"name\":\"time_f\",\"type\":[\"null\",{\"type\":\"long\",\"logicalType\":\"time-micros\"}]},{\"name\":\"datetime_f\",\"type\":[\"null\",{\"type\":\"string\",\"logicalType\":\"datetime\"}]},{\"name\":\"geo_f\",\"type\":[\"null\",{\"type\":\"string\",\"sqlType\":\"GEOGRAPHY\"}]},{\"name\":\"record_f\",\"type\":[\"null\",{\"type\":\"record\",\"name\":\"__s_0\",\"fields\":[{\"name\":\"s\",\"type\":[\"null\",\"string\"]},{\"name\":\"i\",\"type\":[\"null\",\"long\"]}]}]},{\"name\":\"null_f\",\"type\":[\"null\",\"string\"]},{\"name\":\"sarray_f\",\"type\":{\"type\":\"array\",\"items\":\"string\"}},{\"name\":\"iarray_f\",\"type\":[\"null\",\"long\"]}]}";
+      "{\"type\":\"record\",\"name\":\"__root__\",\"fields\":[{\"name\":\"string_f\",\"type\":[\"null\",\"string\"]},{\"name\":\"bytes_f\",\"type\":[\"null\",\"bytes\"]},{\"name\":\"int_f\",\"type\":[\"null\",\"long\"]},{\"name\":\"float_f\",\"type\":[\"null\",\"double\"]},{\"name\":\"numeric_f\",\"type\":[\"null\",{\"type\":\"bytes\",\"logicalType\":\"decimal\",\"precision\":38,\"scale\":9}]},{\"name\":\"boolean_f\",\"type\":[\"null\",\"boolean\"]},{\"name\":\"timestamp_f\",\"type\":[\"null\",{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"}]},{\"name\":\"date_f\",\"type\":[\"null\",{\"type\":\"int\",\"logicalType\":\"date\"}]},{\"name\":\"time_f\",\"type\":[\"null\",{\"type\":\"long\",\"logicalType\":\"time-micros\"}]},{\"name\":\"datetime_f\",\"type\":[\"null\",{\"type\":\"string\",\"logicalType\":\"datetime\"}]},{\"name\":\"geo_f\",\"type\":[\"null\",{\"type\":\"string\",\"sqlType\":\"GEOGRAPHY\"}]},{\"name\":\"record_f\",\"type\":[\"null\",{\"type\":\"record\",\"name\":\"__s_0\",\"fields\":[{\"name\":\"s\",\"type\":[\"null\",\"string\"]},{\"name\":\"i\",\"type\":[\"null\",\"long\"]}]}]},{\"name\":\"null_f\",\"type\":[\"null\",\"string\"]},{\"name\":\"sarray_f\",\"type\":{\"type\":\"array\",\"items\":\"string\"}},{\"name\":\"iarray_f\",\"type\":[\"null\",\"long\"]},{\"name\":\"bignumeric_f\",\"type\":[\"null\",{\"type\":\"bytes\",\"logicalType\":\"decimal\",\"precision\":76,\"scale\":9}]}]}";
   private static final Schema ALL_TYPES_TABLE_BIGQUERY_SCHEMA =
       Schema.of(
           Field.of("string_f", LegacySQLTypeName.STRING),
@@ -57,7 +61,8 @@ public class BigQueryInputPartitionReaderTest {
               .build(),
           Field.newBuilder("iarray_f", LegacySQLTypeName.INTEGER)
               .setMode(Field.Mode.REPEATED)
-              .build());
+              .build(),
+          Field.of("bignumeric_f", LegacySQLTypeName.BIGNUMERIC));
   private static final ImmutableList<String> ALL_TYPES_TABLE_FIELDS =
       ImmutableList.of(
           "string_f",
@@ -74,7 +79,8 @@ public class BigQueryInputPartitionReaderTest {
           "record_f",
           "null_f",
           "sarray_f",
-          "iarray_f");
+          "iarray_f",
+          "bignumeric_f");
 
   private static final String ALL_TYPES_TABLE_READ_ROWS_RESPONSE_STR =
       "stats {\n"

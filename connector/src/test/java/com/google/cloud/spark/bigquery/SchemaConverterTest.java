@@ -19,27 +19,27 @@ import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.LegacySQLTypeName;
 import com.google.cloud.bigquery.Schema;
-import org.apache.log4j.Level;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 import org.apache.spark.ml.linalg.SQLDataTypes;
-import org.apache.spark.sql.types.*;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.DecimalType;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.MetadataBuilder;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import org.junit.Test;
 
 import java.util.Optional;
 
-import static com.google.cloud.spark.bigquery.SchemaConverters.*;
+import static com.google.cloud.spark.bigquery.SchemaConverters.createBigQueryColumn;
+import static com.google.cloud.spark.bigquery.SchemaConverters.toBigQuerySchema;
+import static com.google.cloud.spark.bigquery.SchemaConverters.toBigQueryType;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
 public class SchemaConverterTest {
 
-  // Numeric is a fixed precision Decimal Type with 38 digits of precision and 9 digits of scale.
-  // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#numeric-type
-  private static final int BQ_NUMERIC_PRECISION = 38;
-  private static final int BQ_NUMERIC_SCALE = 9;
-  private static final DecimalType NUMERIC_SPARK_TYPE =
-      DataTypes.createDecimalType(BQ_NUMERIC_PRECISION, BQ_NUMERIC_SCALE);
   // The maximum nesting depth of a BigQuery RECORD:
   private static final int MAX_BIGQUERY_NESTED_DEPTH = 15;
 
@@ -123,7 +123,10 @@ public class SchemaConverterTest {
 
   @Test
   public void testDecimalTypeConversion() throws Exception {
-    assertThat(toBigQueryType(NUMERIC_SPARK_TYPE)).isEqualTo(LegacySQLTypeName.NUMERIC);
+    assertThat(toBigQueryType(SchemaConverters.NUMERIC_SPARK_TYPE))
+        .isEqualTo(LegacySQLTypeName.NUMERIC);
+    assertThat(toBigQueryType(SchemaConverters.BIG_NUMERIC_SPARK_TYPE))
+        .isEqualTo(LegacySQLTypeName.BIGNUMERIC);
 
     try {
       DecimalType wayTooBig = DataTypes.createDecimalType(38, 38);
@@ -312,6 +315,9 @@ public class SchemaConverterTest {
           .add(
               new StructField(
                   "numeric", DataTypes.createDecimalType(38, 9), true, Metadata.empty()))
+          .add(
+              new StructField(
+                  "bignumeric", DataTypes.createDecimalType(76, 9), true, Metadata.empty()))
           .add(new StructField("date", DataTypes.DateType, true, Metadata.empty()))
           .add(
               new StructField(
@@ -339,6 +345,7 @@ public class SchemaConverterTest {
               .build(),
           Field.of("float", LegacySQLTypeName.FLOAT),
           Field.of("numeric", LegacySQLTypeName.NUMERIC),
+          Field.of("bignumeric", LegacySQLTypeName.BIGNUMERIC),
           Field.of("date", LegacySQLTypeName.DATE),
           Field.of(
               "times",

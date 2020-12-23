@@ -90,8 +90,10 @@ public class AvroSchemaConverter {
     }
     if (dataType instanceof DecimalType) {
       DecimalType decimalType = (DecimalType) dataType;
-      if (decimalType.precision() <= SchemaConverters.BQ_NUMERIC_PRECISION
-          && decimalType.scale() <= SchemaConverters.BQ_NUMERIC_SCALE) {
+      if ((decimalType.scale() <= SchemaConverters.BQ_NUMERIC_SCALE
+              && decimalType.precision() <= SchemaConverters.BQ_NUMERIC_PRECISION)
+          || (decimalType.scale() <= SchemaConverters.BQ_BIG_NUMERIC_SCALE
+              && decimalType.precision() <= SchemaConverters.BQ_BIG_NUMERIC_PRECISION)) {
         return LogicalTypes.decimal(decimalType.precision(), decimalType.scale())
             .addToSchema(builder.bytesType());
       } else {
