@@ -20,6 +20,7 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
+import com.google.auth.oauth2.UserCredentials;
 import org.junit.Test;
 
 import java.io.File;
@@ -73,7 +74,7 @@ public class BigQueryCredentialsSupplierTest {
   }
 
   @Test
-  public void testCredentialsFromKey() throws Exception {
+  public void testServiceAccountCredentialsFromKey() throws Exception {
     String json = createServiceAccountJson("key");
     String credentialsKey =
         Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
@@ -88,6 +89,33 @@ public class BigQueryCredentialsSupplierTest {
     assertThat(serviceAccountCredentials.getClientEmail()).isEqualTo(CLIENT_EMAIL);
     assertThat(serviceAccountCredentials.getClientId()).isEqualTo(CLIENT_ID);
     assertThat(serviceAccountCredentials.getQuotaProjectId()).isEqualTo(QUOTA_PROJECT);
+  }
+
+  @Test
+  public void testUserCredentialsFromKey() throws Exception {
+    String clientId = "1234567890.apps.googleusercontent.com";
+    String clientSecret = "000000000000000000000000";
+    String refreshToken =
+        "1//000_000000000000000000000000-000000000000_0000000000000000000000000000000000000000000000000000000000";
+
+    GenericJson json = new GenericJson();
+    json.setFactory(JacksonFactory.getDefaultInstance());
+    json.put("client_id", clientId);
+    json.put("client_secret", clientSecret);
+    json.put("refresh_token", refreshToken);
+    json.put("type", "authorized_user");
+    String credentialsKey =
+        Base64.getEncoder().encodeToString(json.toPrettyString().getBytes(StandardCharsets.UTF_8));
+
+    Credentials credentials =
+        new BigQueryCredentialsSupplier(
+                Optional.empty(), Optional.of(credentialsKey), Optional.empty())
+            .getCredentials();
+    assertThat(credentials).isInstanceOf(UserCredentials.class);
+    UserCredentials userCredentials = (UserCredentials) credentials;
+    assertThat(userCredentials.getClientId()).isEqualTo(clientId);
+    assertThat(userCredentials.getClientSecret()).isEqualTo(clientSecret);
+    assertThat(userCredentials.getRefreshToken()).isEqualTo(refreshToken);
   }
 
   @Test
