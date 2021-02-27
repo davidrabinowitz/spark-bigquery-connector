@@ -19,14 +19,11 @@ import java.sql.{Date, Timestamp}
 import java.util.UUID
 import java.util.concurrent.{Callable, TimeUnit}
 
-import com.google.api.gax.core.CredentialsProvider
-import com.google.api.gax.rpc.FixedHeaderProvider
-import com.google.auth.Credentials
-import com.google.cloud.bigquery.connector.common.BigQueryUtil
+import com.google.cloud.bigquery._
+import com.google.cloud.bigquery.connector.common.{BigQueryReadClientFactory, BigQueryUtil}
 import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions
-import com.google.cloud.bigquery.storage.v1.{BigQueryReadClient, BigQueryReadSettings, CreateReadSessionRequest, DataFormat, ReadSession}
-import com.google.cloud.bigquery.{BigQuery, JobInfo, QueryJobConfiguration, Schema, StandardTableDefinition, TableDefinition, TableId, TableInfo}
-import com.google.cloud.spark.bigquery.{BigQueryRelation, BigQueryUtilScala, SchemaConverters, SparkBigQueryConfig, SparkBigQueryConnectorUserAgentProvider}
+import com.google.cloud.bigquery.storage.v1.{CreateReadSessionRequest, DataFormat, ReadSession}
+import com.google.cloud.spark.bigquery.{BigQueryRelation, BigQueryUtilScala, SchemaConverters, SparkBigQueryConfig}
 import com.google.common.cache.{Cache, CacheBuilder}
 import org.apache.spark.Partition
 import org.apache.spark.rdd.RDD
@@ -40,8 +37,7 @@ import scala.collection.JavaConverters._
 private[bigquery] class DirectBigQueryRelation(
     options: SparkBigQueryConfig,
     table: TableInfo,
-    getClient: SparkBigQueryConfig => BigQueryReadClient =
-         DirectBigQueryRelation.createReadClient,
+    bigQueryReadClientFactory: BigQueryReadClientFactory,
     bigQueryClient: SparkBigQueryConfig => BigQuery =
          BigQueryUtilScala.createBigQuery)
     (@transient override val sqlContext: SQLContext)
@@ -124,7 +120,8 @@ private[bigquery] class DirectBigQueryRelation(
         actualTableDefinition.getSchema.getFields.asScala
           .filter(f => requiredColumnSet.contains(f.getName)).asJava)
 
-      val client = getClient(options)
+      val client = bigQueryReadClientFactory.createBigQueryReadClient(
+        BigQueryReadClientFactory.Usage.CREATE_READ_SESSION)
 
       val maxNumPartitionsRequested = getMaxNumPartitionsRequested(actualTableDefinition)
 
@@ -167,7 +164,7 @@ private[bigquery] class DirectBigQueryRelation(
           prunedSchema,
           requiredColumns,
           options,
-          getClient,
+          bigQueryReadClientFactory,
           bigQueryClient).asInstanceOf[RDD[Row]]
 
       } finally {
@@ -254,7 +251,7 @@ private[bigquery] class DirectBigQueryRelation(
   }
 
   // return empty if no filters are used
-  def createWhereClause(filtersString: String): Option[String] = {
+  def createWhereClause(filtersString: String): scala.Option[String] = {
     BigQueryUtilScala.noneIfEmpty(filtersString)
   }
 
@@ -337,26 +334,6 @@ object DirectBigQueryRelation {
 
   // used for testing
   var emptyRowRDDsCreated = 0;
-
-  def createReadClient(options: SparkBigQueryConfig): BigQueryReadClient = {
-    // TODO(pmkc): investigate thread pool sizing and log spam matching
-    // https://github.com/grpc/grpc-java/issues/4544 in integration tests
-    var clientSettings = BigQueryReadSettings.newBuilder()
-      .setTransportChannelProvider(
-        BigQueryReadSettings.defaultGrpcTransportProviderBuilder()
-          .setHeaderProvider(headerProvider)
-          .build())
-     clientSettings.setCredentialsProvider(
-        new CredentialsProvider {
-          override def getCredentials: Credentials = options.createCredentials
-        })
-
-    BigQueryReadClient.create(clientSettings.build)
-  }
-
-  private def headerProvider =
-    FixedHeaderProvider.create("user-agent",
-      new SparkBigQueryConnectorUserAgentProvider("v1").getUserAgent)
 
   def isTopLevelFieldFilterHandled(
       filter: Filter,

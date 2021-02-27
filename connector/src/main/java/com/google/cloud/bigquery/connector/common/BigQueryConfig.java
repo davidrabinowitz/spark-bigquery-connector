@@ -16,7 +16,9 @@
 package com.google.cloud.bigquery.connector.common;
 
 import com.google.api.gax.retrying.RetrySettings;
+import com.google.common.collect.ImmutableMap;
 
+import java.util.Map;
 import java.util.Optional;
 
 public interface BigQueryConfig {
@@ -40,4 +42,7 @@ public interface BigQueryConfig {
   int getBigQueryClientReadTimeout();
 
   RetrySettings getBigQueryClientRetrySettings();
+
+  Map<BigQueryReadClientFactory.Usage, ImmutableMap<String, String>>
+      getBigQueryReadClientFactoryMetadata();
 }

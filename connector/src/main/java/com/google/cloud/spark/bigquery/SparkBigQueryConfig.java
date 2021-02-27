@@ -25,6 +25,7 @@ import com.google.cloud.bigquery.TimePartitioning;
 import com.google.cloud.bigquery.connector.common.BigQueryClient;
 import com.google.cloud.bigquery.connector.common.BigQueryConfig;
 import com.google.cloud.bigquery.connector.common.BigQueryCredentialsSupplier;
+import com.google.cloud.bigquery.connector.common.BigQueryReadClientFactory;
 import com.google.cloud.bigquery.connector.common.ReadSessionCreatorConfig;
 import com.google.cloud.bigquery.storage.v1.DataFormat;
 import com.google.common.annotations.VisibleForTesting;
@@ -112,6 +113,8 @@ public class SparkBigQueryConfig implements BigQueryConfig, Serializable {
   ImmutableList<JobInfo.SchemaUpdateOption> loadSchemaUpdateOptions = ImmutableList.of();
   int materializationExpirationTimeInMinutes = DEFAULT_MATERIALIZATION_EXPRIRATION_TIME_IN_MINUTES;
   int maxReadRowsRetries = 3;
+  ImmutableMap<String, String> createReadSessionMetadata = ImmutableMap.of();
+  ImmutableMap<String, String> readRowsMetadata = ImmutableMap.of();
 
   @VisibleForTesting
   SparkBigQueryConfig() {
@@ -266,8 +269,33 @@ public class SparkBigQueryConfig implements BigQueryConfig, Serializable {
       loadSchemaUpdateOptions.add(JobInfo.SchemaUpdateOption.ALLOW_FIELD_RELAXATION);
     }
     config.loadSchemaUpdateOptions = loadSchemaUpdateOptions.build();
-
+    config.createReadSessionMetadata = loadMetadata("createreadsession", options, globalOptions);
+    config.readRowsMetadata = loadMetadata("readrows", options, globalOptions);
     return config;
+  }
+
+  /**
+   * Returns a map of key->val for all the configurations with the pattern
+   * <code>.option("metadata.<prefix>.key", "val")</code>
+   */
+  static ImmutableMap<String, String> loadMetadata(
+      String prefix, Map<String, String> options, Map<String, String> globalOptions) {
+    ImmutableMap.Builder<String, String> result = ImmutableMap.builder();
+    String keyPrefix = "metadata." + prefix + ".";
+    buildMetadataFromOptions(result, keyPrefix, globalOptions);
+    buildMetadataFromOptions(result, keyPrefix, options);
+    return result.build();
+  }
+
+  static void buildMetadataFromOptions(
+      ImmutableMap.Builder<String, String> resultBuilder,
+      String keyPrefix,
+      Map<String, String> optionsMap) {
+    for (Map.Entry<String, String> entry : optionsMap.entrySet()) {
+      if (entry.getKey().startsWith(keyPrefix)) {
+        resultBuilder.put(entry.getKey().substring(keyPrefix.length()), entry.getValue());
+      }
+    }
   }
 
   private static void validateDateFormat(
@@ -536,6 +564,14 @@ public class SparkBigQueryConfig implements BigQueryConfig, Serializable {
         .setInitialRetryDelay(Duration.ofMillis(1250))
         .setMaxRetryDelay(Duration.ofSeconds(5))
         .build();
+  }
+
+  @Override
+  public Map<BigQueryReadClientFactory.Usage, ImmutableMap<String, String>> getBigQueryReadClientFactoryMetadata() {
+    return ImmutableMap.<BigQueryReadClientFactory.Usage, ImmutableMap<String, String>>builder()
+            .put(BigQueryReadClientFactory.Usage.CREATE_READ_SESSION, this.createReadSessionMetadata)
+            .put(BigQueryReadClientFactory.Usage.READ_ROWS, this.readRowsMetadata)
+            .build();
   }
 
   public ReadSessionCreatorConfig toReadSessionCreatorConfig() {

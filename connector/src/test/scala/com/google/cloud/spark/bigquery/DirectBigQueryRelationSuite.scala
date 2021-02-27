@@ -18,6 +18,7 @@ package com.google.cloud.spark.bigquery
 import java.sql.{Date, Timestamp}
 
 import com.google.cloud.bigquery._
+import com.google.cloud.bigquery.connector.common.{BigQueryCredentialsSupplier, BigQueryReadClientFactory, UserAgentHeaderProvider}
 import com.google.cloud.bigquery.storage.v1.DataFormat
 import com.google.cloud.spark.bigquery.direct.DirectBigQueryRelation
 import org.apache.spark.sql.SQLContext
@@ -46,13 +47,22 @@ class DirectBigQueryRelationSuite
       )
       .setNumBytes(42L * 1000 * 1000 * 1000) // 42GB
       .build())
+  private val bigQueryReadClientFactory = {
+    val options = defaultOptions
+    val credentialsSupplier = new BigQueryCredentialsSupplier(
+      options.getAccessToken(), options.getCredentialsKey(), options.getCredentialsFile())
+    new BigQueryReadClientFactory(
+      credentialsSupplier,
+      new UserAgentHeaderProvider("test"),
+      options.getBigQueryReadClientFactoryMetadata)
+  }
   private var bigQueryRelation: DirectBigQueryRelation = _
 
   before {
     val options = defaultOptions
     options.readDataFormat = DataFormat.AVRO
     MockitoAnnotations.initMocks(this)
-    bigQueryRelation = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    bigQueryRelation = new DirectBigQueryRelation(options, TABLE, bigQueryReadClientFactory)(sqlCtx)
   }
 
   after {
@@ -80,7 +90,7 @@ class DirectBigQueryRelationSuite
     val expectedSchema = StructType(Seq(StructField("baz", ShortType)))
     val options = defaultOptions
     options.schema = com.google.common.base.Optional.of(expectedSchema)
-    bigQueryRelation = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    bigQueryRelation = new DirectBigQueryRelation(options, TABLE, bigQueryReadClientFactory)(sqlCtx)
     val schema = bigQueryRelation.schema
     assert(expectedSchema == schema)
   }
@@ -110,7 +120,8 @@ class DirectBigQueryRelationSuite
   test("valid filters for Arrow") {
     val options = defaultOptions
     options.readDataFormat = DataFormat.ARROW
-    val bigQueryRelation = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    val bigQueryRelation = new DirectBigQueryRelation(
+      options, TABLE, bigQueryReadClientFactory)(sqlCtx)
 
     val validFilters = Seq(
       EqualTo("foo", "manatee"),
@@ -150,7 +161,8 @@ class DirectBigQueryRelationSuite
   test("invalid filters with Arrow") {
     val options = defaultOptions
     options.readDataFormat = DataFormat.ARROW
-    val bigQueryRelation = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    val bigQueryRelation = new DirectBigQueryRelation(
+      options, TABLE, bigQueryReadClientFactory)(sqlCtx)
 
     val valid1 = EqualTo("foo", "bar")
     val valid2 = EqualTo("bar", 1)
@@ -166,33 +178,33 @@ class DirectBigQueryRelationSuite
     val options = defaultOptions
     options.combinePushedDownFilters = false
     options.filter = com.google.common.base.Optional.of("f>1")
-    val r = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    val r = new DirectBigQueryRelation(options, TABLE, bigQueryReadClientFactory)(sqlCtx)
     checkFilters(r, "f>1", Array(GreaterThan("a", 2)), "f>1")
   }
 
   test("old filter behaviour, no filter option") {
     val options = defaultOptions
     options.combinePushedDownFilters = false
-    val r = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    val r = new DirectBigQueryRelation(options, TABLE, bigQueryReadClientFactory)(sqlCtx)
     checkFilters(r, "", Array(GreaterThan("a", 2)), "a > 2")
   }
 
   test("new filter behaviour, with filter option") {
     val options = defaultOptions
     options.filter = com.google.common.base.Optional.of("f>1")
-    val r = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    val r = new DirectBigQueryRelation(options, TABLE, bigQueryReadClientFactory)(sqlCtx)
     checkFilters(r, "(f>1)", Array(GreaterThan("a", 2)), "(f>1) AND (a > 2)")
   }
 
   test("new filter behaviour, no filter option") {
     val r = new DirectBigQueryRelation(
-      defaultOptions, TABLE)(sqlCtx)
+      defaultOptions, TABLE, bigQueryReadClientFactory)(sqlCtx)
     checkFilters(r, "", Array(GreaterThan("a", 2)), "(a > 2)")
   }
 
   test("filter on date and timestamp fields") {
     val options = defaultOptions
-    val r = new DirectBigQueryRelation(options, TABLE)(sqlCtx)
+    val r = new DirectBigQueryRelation(options, TABLE, bigQueryReadClientFactory)(sqlCtx)
     val inFilter = In("datefield", Array(Date.valueOf("2020-09-01"), Date.valueOf("2020-11-03")))
     val equalFilter = EqualTo("tsField", Timestamp.valueOf("2020-01-25 02:10:10"))
     checkFilters(r, "", Array(inFilter, equalFilter),
@@ -201,11 +213,11 @@ class DirectBigQueryRelationSuite
   }
 
   def checkFilters(
-        relation: DirectBigQueryRelation,
-        resultWithoutFilters: String,
-        filters: Array[Filter],
-        resultWithFilters: String
-      ): Unit = {
+                    relation: DirectBigQueryRelation,
+                    resultWithoutFilters: String,
+                    filters: Array[Filter],
+                    resultWithFilters: String
+                  ): Unit = {
     val result1 = relation.getCompiledFilter(Array())
     result1 shouldBe resultWithoutFilters
     val result2 = relation.getCompiledFilter(filters)

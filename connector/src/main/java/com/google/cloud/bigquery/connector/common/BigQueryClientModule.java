@@ -19,7 +19,6 @@ import com.google.cloud.bigquery.BigQueryOptions;
 import com.google.cloud.http.HttpTransportOptions;
 import com.google.inject.Binder;
 import com.google.inject.Provides;
-import com.google.inject.Scopes;
 import com.google.inject.Singleton;
 
 public class BigQueryClientModule implements com.google.inject.Module {
@@ -33,8 +32,7 @@ public class BigQueryClientModule implements com.google.inject.Module {
 
   @Override
   public void configure(Binder binder) {
-    // BigQuery related
-    binder.bind(BigQueryReadClientFactory.class).in(Scopes.SINGLETON);
+    // empty
   }
 
   @Provides
@@ -42,6 +40,18 @@ public class BigQueryClientModule implements com.google.inject.Module {
   public BigQueryCredentialsSupplier provideBigQueryCredentialsSupplier(BigQueryConfig config) {
     return new BigQueryCredentialsSupplier(
         config.getAccessToken(), config.getCredentialsKey(), config.getCredentialsFile());
+  }
+
+  @Provides
+  @Singleton
+  public BigQueryReadClientFactory provideBigQueryReadClientFactory(
+      BigQueryCredentialsSupplier bigQueryCredentialsSupplier,
+      UserAgentHeaderProvider userAgentHeaderProvider,
+      BigQueryConfig config) {
+    return new BigQueryReadClientFactory(
+        bigQueryCredentialsSupplier,
+        userAgentHeaderProvider,
+        config.getBigQueryReadClientFactoryMetadata());
   }
 
   @Provides

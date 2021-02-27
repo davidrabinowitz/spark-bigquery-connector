@@ -16,14 +16,17 @@
 package com.google.cloud.bigquery.connector.common;
 
 import com.google.api.gax.core.FixedCredentialsProvider;
+import com.google.api.gax.rpc.FixedHeaderProvider;
+import com.google.api.gax.rpc.HeaderProvider;
 import com.google.auth.Credentials;
 import com.google.cloud.bigquery.storage.v1.BigQueryReadClient;
 import com.google.cloud.bigquery.storage.v1.BigQueryReadSettings;
+import com.google.common.collect.ImmutableMap;
 
-import javax.inject.Inject;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
+import java.util.Map;
 
 /**
  * Since Guice recommends to avoid injecting closeable resources (see
@@ -34,28 +37,46 @@ public class BigQueryReadClientFactory implements Serializable {
   private final Credentials credentials;
   // using the user agent as HeaderProvider is not serializable
   private final UserAgentHeaderProvider userAgentHeaderProvider;
+  // Additional headers the user can add to the BigQuery Storage API
+  private final Map<Usage, ImmutableMap<String, String>> metadata;
 
-  @Inject
   public BigQueryReadClientFactory(
       BigQueryCredentialsSupplier bigQueryCredentialsSupplier,
-      UserAgentHeaderProvider userAgentHeaderProvider) {
+      UserAgentHeaderProvider userAgentHeaderProvider,
+      Map<Usage, ImmutableMap<String, String>> metadata) {
     // using Guava's optional as it is serializable
     this.credentials = bigQueryCredentialsSupplier.getCredentials();
     this.userAgentHeaderProvider = userAgentHeaderProvider;
+    this.metadata = metadata;
   }
 
-  BigQueryReadClient createBigQueryReadClient() {
+  /** Creating a read client, adding metadata if needed based on the usage. */
+  // TODO: have the scala implementation use the utils from this packages and then it can return to
+  // be package protected
+  public BigQueryReadClient createBigQueryReadClient(Usage usage) {
     try {
+      ImmutableMap<String, String> additionalHeaders = metadata.get(usage);
+      HeaderProvider combinedHeaderProvider =
+          FixedHeaderProvider.create(
+              ImmutableMap.<String, String>builder()
+                  .putAll(additionalHeaders)
+                  .putAll(userAgentHeaderProvider.getHeaders())
+                  .build());
       BigQueryReadSettings.Builder clientSettings =
           BigQueryReadSettings.newBuilder()
               .setTransportChannelProvider(
                   BigQueryReadSettings.defaultGrpcTransportProviderBuilder()
-                      .setHeaderProvider(userAgentHeaderProvider)
+                      .setHeaderProvider(combinedHeaderProvider)
                       .build())
               .setCredentialsProvider(FixedCredentialsProvider.create(credentials));
       return BigQueryReadClient.create(clientSettings.build());
     } catch (IOException e) {
       throw new UncheckedIOException("Error creating BigQueryStorageClient", e);
     }
+  }
+
+  public enum Usage {
+    CREATE_READ_SESSION,
+    READ_ROWS
   }
 }

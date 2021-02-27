@@ -16,8 +16,8 @@
 package com.google.cloud.spark.bigquery.direct
 
 import com.google.api.gax.rpc.ServerStreamingCallable
-import com.google.cloud.bigquery.connector.common.BigQueryUtil
-import com.google.cloud.bigquery.storage.v1.{BigQueryReadClient, DataFormat, ReadRowsRequest, ReadRowsResponse, ReadSession, ReadStream}
+import com.google.cloud.bigquery.connector.common.{BigQueryReadClientFactory, BigQueryUtil}
+import com.google.cloud.bigquery.storage.v1._
 import com.google.cloud.bigquery.{BigQuery, Schema}
 import com.google.cloud.spark.bigquery.{ArrowBinaryIterator, AvroBinaryIterator, SparkBigQueryConfig}
 import com.google.protobuf.ByteString
@@ -36,7 +36,7 @@ class BigQueryRDD(sc: SparkContext,
                   columnsInOrder: Seq[String],
                   bqSchema: Schema,
                   options: SparkBigQueryConfig,
-                  getClient: SparkBigQueryConfig => BigQueryReadClient,
+                  bigQueryReadClientFactory: BigQueryReadClientFactory,
                   bigQueryClient: SparkBigQueryConfig => BigQuery)
   extends RDD[InternalRow](sc, Nil) {
 
@@ -44,7 +44,8 @@ class BigQueryRDD(sc: SparkContext,
     val bqPartition = split.asInstanceOf[BigQueryPartition]
     val request = ReadRowsRequest.newBuilder().setReadStream(bqPartition.stream)
 
-    val client = getClient(options)
+    val client = bigQueryReadClientFactory.createBigQueryReadClient(
+      BigQueryReadClientFactory.Usage.READ_ROWS)
 
     context.addTaskCompletionListener(ctx => {
       client.close
@@ -76,14 +77,14 @@ class BigQueryRDD(sc: SparkContext,
 /**
  * A converter for transforming an iterator on ReadRowsResponse to an iterator
  * that converts each of these rows to Arrow Schema
- * @param columnsInOrder Ordered columns in the Big Query schema
- * @param rawArrowSchema Schema representation in arrow format
+ *
+ * @param columnsInOrder      Ordered columns in the Big Query schema
+ * @param rawArrowSchema      Schema representation in arrow format
  * @param rowResponseIterator Iterator over rows read from big query
  */
 case class ArrowConverter(columnsInOrder: Seq[String],
-                          rawArrowSchema : ByteString,
-                          rowResponseIterator : Iterator[ReadRowsResponse])
-{
+                          rawArrowSchema: ByteString,
+                          rowResponseIterator: Iterator[ReadRowsResponse]) {
   def getIterator(): Iterator[InternalRow] = {
     rowResponseIterator.flatMap(readRowResponse =>
       new ArrowBinaryIterator(columnsInOrder.asJava,
@@ -95,20 +96,19 @@ case class ArrowConverter(columnsInOrder: Seq[String],
 /**
  * A converter for transforming an iterator on ReadRowsResponse to an iterator
  * that converts each of these rows to Avro Schema
- * @param bqSchema Schema of underlying big query source
- * @param columnsInOrder Ordered columns in the Big Query schema
- * @param rawAvroSchema Schema representation in Avro format
+ *
+ * @param bqSchema            Schema of underlying big query source
+ * @param columnsInOrder      Ordered columns in the Big Query schema
+ * @param rawAvroSchema       Schema representation in Avro format
  * @param rowResponseIterator Iterator over rows read from big query
  */
-case class AvroConverter (bqSchema: Schema,
-                 columnsInOrder: Seq[String],
-                 rawAvroSchema: String,
-                 rowResponseIterator : Iterator[ReadRowsResponse])
-{
+case class AvroConverter(bqSchema: Schema,
+                         columnsInOrder: Seq[String],
+                         rawAvroSchema: String,
+                         rowResponseIterator: Iterator[ReadRowsResponse]) {
   @transient private lazy val avroSchema = new AvroSchema.Parser().parse(rawAvroSchema)
 
-  def getIterator(): Iterator[InternalRow] =
-  {
+  def getIterator(): Iterator[InternalRow] = {
     rowResponseIterator.flatMap(toRows)
   }
 
@@ -134,8 +134,8 @@ case class ReadRowsClientWrapper(client: BigQueryReadClient)
   override def close: Unit = client.close
 }
 
-class ReadRowsIterator (val helper: ReadRowsHelper,
-                        var serverResponses: java.util.Iterator[ReadRowsResponse] )
+class ReadRowsIterator(val helper: ReadRowsHelper,
+                       var serverResponses: java.util.Iterator[ReadRowsResponse])
   extends Logging with Iterator[ReadRowsResponse] {
   var readRowsCount: Long = 0
   var retries: Int = 0
@@ -170,7 +170,7 @@ case class ReadRowsHelper(
                            client: ReadRowsClient,
                            request: ReadRowsRequest.Builder,
                            maxReadRowsRetries: Int
-                         )  {
+                         ) {
   def readRows(): Iterator[ReadRowsResponse] = {
     val serverResponses = fetchResponses(request)
     new ReadRowsIterator(this, serverResponses)
@@ -181,8 +181,8 @@ case class ReadRowsHelper(
   java.util.Iterator[
     ReadRowsResponse] =
     client.readRowsCallable
-    .call(readRowsRequest.build)
-    .iterator
+      .call(readRowsRequest.build)
+      .iterator
 
 }
 
@@ -193,7 +193,7 @@ object BigQueryRDD {
                 bqSchema: Schema,
                 columnsInOrder: Seq[String],
                 options: SparkBigQueryConfig,
-                getClient: SparkBigQueryConfig => BigQueryReadClient,
+                bigQueryReadClientFactory: BigQueryReadClientFactory,
                 bigQueryClient: SparkBigQueryConfig => BigQuery): BigQueryRDD = {
     new BigQueryRDD(sqlContext.sparkContext,
       parts,
@@ -201,7 +201,7 @@ object BigQueryRDD {
       columnsInOrder: Seq[String],
       bqSchema,
       options,
-      getClient,
+      bigQueryReadClientFactory,
       bigQueryClient)
   }
 }

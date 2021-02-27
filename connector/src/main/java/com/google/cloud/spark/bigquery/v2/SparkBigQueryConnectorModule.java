@@ -80,6 +80,6 @@ public class SparkBigQueryConnectorModule implements Module {
   @Singleton
   @Provides
   public UserAgentProvider provideUserAgentProvider() {
-    return new SparkBigQueryConnectorUserAgentProvider("v2");
+    return new SparkBigQueryConnectorUserAgentProvider(dataSourceVersion.toString().toLowerCase());
   }
 }

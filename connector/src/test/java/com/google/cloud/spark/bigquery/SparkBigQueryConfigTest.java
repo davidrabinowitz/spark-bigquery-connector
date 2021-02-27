@@ -18,6 +18,7 @@ package com.google.cloud.spark.bigquery;
 import com.google.cloud.bigquery.JobInfo;
 import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TimePartitioning;
+import com.google.cloud.bigquery.connector.common.BigQueryReadClientFactory;
 import com.google.cloud.bigquery.storage.v1.DataFormat;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -72,6 +73,16 @@ public class SparkBigQueryConfigTest {
     assertThat(config.getMaterializationExpirationTimeInMinutes()).isEqualTo(24 * 60);
     assertThat(config.getMaxReadRowsRetries()).isEqualTo(3);
     assertThat(config.isUseAvroLogicalTypes()).isFalse();
+    assertThat(
+            config
+                .getBigQueryReadClientFactoryMetadata()
+                .get(BigQueryReadClientFactory.Usage.CREATE_READ_SESSION))
+        .isEmpty();
+    assertThat(
+            config
+                .getBigQueryReadClientFactoryMetadata()
+                .get(BigQueryReadClientFactory.Usage.READ_ROWS))
+        .isEmpty();
   }
 
   @Test
@@ -103,6 +114,8 @@ public class SparkBigQueryConfigTest {
                 .put("clusteredFields", "field1,field2")
                 .put("allowFieldAddition", "true")
                 .put("allowFieldRelaxation", "true")
+                .put("metadata.createreadsession.x-crs", "v1")
+                .put("metadata.readrows.x-rr", "v2")
                 .build());
     SparkBigQueryConfig config =
         SparkBigQueryConfig.from(
@@ -138,6 +151,18 @@ public class SparkBigQueryConfigTest {
     assertThat(config.getMaterializationExpirationTimeInMinutes()).isEqualTo(100);
     assertThat(config.getMaxReadRowsRetries()).isEqualTo(3);
     assertThat(config.isUseAvroLogicalTypes()).isTrue();
+    ImmutableMap<String, String> createReadSessionMetadata =
+        config
+            .getBigQueryReadClientFactoryMetadata()
+            .get(BigQueryReadClientFactory.Usage.CREATE_READ_SESSION);
+    assertThat(createReadSessionMetadata).hasSize(1);
+    assertThat(createReadSessionMetadata).containsEntry("x-crs", "v1");
+    ImmutableMap<String, String> readRowsMetadata =
+        config
+            .getBigQueryReadClientFactoryMetadata()
+            .get(BigQueryReadClientFactory.Usage.READ_ROWS);
+    assertThat(readRowsMetadata).hasSize(1);
+    assertThat(readRowsMetadata).containsEntry("x-rr", "v2");
   }
 
   @Test

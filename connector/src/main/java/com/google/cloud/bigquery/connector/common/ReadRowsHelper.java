@@ -15,13 +15,12 @@
  */
 package com.google.cloud.bigquery.connector.common;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.google.api.gax.rpc.ServerStream;
 import com.google.cloud.bigquery.storage.v1.BigQueryReadClient;
 import com.google.cloud.bigquery.storage.v1.ReadRowsRequest;
 import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
@@ -51,7 +50,9 @@ public class ReadRowsHelper {
     if (client != null) {
       client.close();
     }
-    client = bigQueryReadClientFactory.createBigQueryReadClient();
+    client =
+        bigQueryReadClientFactory.createBigQueryReadClient(
+            BigQueryReadClientFactory.Usage.READ_ROWS);
     Iterator<ReadRowsResponse> serverResponses = fetchResponses(request);
     return new ReadRowsIterator(this, serverResponses);
   }
@@ -65,6 +66,24 @@ public class ReadRowsHelper {
   @Override
   public String toString() {
     return request.toString();
+  }
+
+  public void close() {
+    if (incomingStream != null) {
+      try {
+        // There appears to be a race when calling cancel for an already
+        // consumed stream can cause an exception to be thrown. Since
+        // this is part of the shutdown process, it should be safe to
+        // ignore the error.
+        incomingStream.cancel();
+      } catch (Exception e) {
+        logger.debug("Error on cancel call", e);
+      }
+      incomingStream = null;
+    }
+    if (!client.isShutdown()) {
+      client.close();
+    }
   }
 
   // Ported from https://github.com/GoogleCloudDataproc/spark-bigquery-connector/pull/150
@@ -109,24 +128,6 @@ public class ReadRowsHelper {
       } while (serverResponses.hasNext());
 
       throw new NoSuchElementException("No more server responses");
-    }
-  }
-
-  public void close() {
-    if (incomingStream != null) {
-      try {
-        // There appears to be a race when calling cancel for an already
-        // consumed stream can cause an exception to be thrown. Since
-        // this is part of the shutdown process, it should be safe to
-        // ignore the error.
-        incomingStream.cancel();
-      } catch (Exception e) {
-        logger.debug("Error on cancel call", e);
-      }
-      incomingStream = null;
-    }
-    if (!client.isShutdown()) {
-      client.close();
     }
   }
 }
