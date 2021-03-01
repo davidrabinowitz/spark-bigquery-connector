@@ -85,9 +85,9 @@ public class SparkBigQueryConfig implements BigQueryConfig, Serializable {
   TableId tableId;
   com.google.common.base.Optional<String> query = empty();
   String parentProjectId;
-  com.google.common.base.Optional<String> credentialsKey;
-  com.google.common.base.Optional<String> credentialsFile;
-  com.google.common.base.Optional<String> accessToken;
+  com.google.common.base.Optional<String> credentialsKey = empty();
+  com.google.common.base.Optional<String> credentialsFile = empty();
+  com.google.common.base.Optional<String> accessToken = empty();
   com.google.common.base.Optional<String> filter = empty();
   com.google.common.base.Optional<StructType> schema = empty();
   Integer maxParallelism = null;
@@ -275,8 +275,8 @@ public class SparkBigQueryConfig implements BigQueryConfig, Serializable {
   }
 
   /**
-   * Returns a map of key->val for all the configurations with the pattern
-   * <code>.option("metadata.<prefix>.key", "val")</code>
+   * Returns a map of key->val for all the configurations with the pattern <code>
+   * .option("metadata.<prefix>.key", "val")</code>
    */
   static ImmutableMap<String, String> loadMetadata(
       String prefix, Map<String, String> options, Map<String, String> globalOptions) {
@@ -567,11 +567,12 @@ public class SparkBigQueryConfig implements BigQueryConfig, Serializable {
   }
 
   @Override
-  public Map<BigQueryReadClientFactory.Usage, ImmutableMap<String, String>> getBigQueryReadClientFactoryMetadata() {
+  public Map<BigQueryReadClientFactory.Usage, ImmutableMap<String, String>>
+      getBigQueryReadClientFactoryMetadata() {
     return ImmutableMap.<BigQueryReadClientFactory.Usage, ImmutableMap<String, String>>builder()
-            .put(BigQueryReadClientFactory.Usage.CREATE_READ_SESSION, this.createReadSessionMetadata)
-            .put(BigQueryReadClientFactory.Usage.READ_ROWS, this.readRowsMetadata)
-            .build();
+        .put(BigQueryReadClientFactory.Usage.CREATE_READ_SESSION, this.createReadSessionMetadata)
+        .put(BigQueryReadClientFactory.Usage.READ_ROWS, this.readRowsMetadata)
+        .build();
   }
 
   public ReadSessionCreatorConfig toReadSessionCreatorConfig() {

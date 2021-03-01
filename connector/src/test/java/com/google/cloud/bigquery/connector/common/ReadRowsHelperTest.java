@@ -15,22 +15,36 @@
  */
 package com.google.cloud.bigquery.connector.common;
 
+import com.google.cloud.bigquery.storage.v1.BigQueryReadClient;
 import com.google.cloud.bigquery.storage.v1.ReadRowsRequest;
 import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
+import com.google.cloud.bigquery.storage.v1.stub.EnhancedBigQueryReadStub;
 import com.google.common.collect.ImmutableList;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Iterator;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class ReadRowsHelperTest {
   // it is not used, we just need the reference
   BigQueryReadClientFactory clientFactory = mock(BigQueryReadClientFactory.class);
   private ReadRowsRequest.Builder request = ReadRowsRequest.newBuilder().setReadStream("test");
+
+  @Before
+  public void setUp() {
+    BigQueryReadClient bigQueryReadClient =
+        BigQueryReadClient.create(mock(EnhancedBigQueryReadStub.class));
+    when(clientFactory.createBigQueryReadClient(any(BigQueryReadClientFactory.Usage.class)))
+        .thenReturn(bigQueryReadClient);
+  }
 
   @Test
   public void testNoFailures() {
