@@ -1,5 +1,7 @@
 # Release Notes
 
+testing __two underscores
+
 ## 0.18.0 - 2020-11-12
 * Issue #226: Adding support for HOUR, MONTH, DAY TimePartitions
 * Issue #260: Increasing connection timeout to the BigQuery service, and 
