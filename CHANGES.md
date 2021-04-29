@@ -1,6 +1,6 @@
 # Release Notes
 
-testing __two underscores
+testing _two _underscores 
 
 ## 0.18.0 - 2020-11-12
 * Issue #226: Adding support for HOUR, MONTH, DAY TimePartitions
