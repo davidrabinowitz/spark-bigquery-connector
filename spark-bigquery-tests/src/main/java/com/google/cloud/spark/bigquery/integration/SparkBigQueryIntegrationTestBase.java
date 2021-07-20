@@ -13,27 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.cloud.spark.bigquery.acceptance;
+package com.google.cloud.spark.bigquery.integration;
 
-public enum DataprocImage {
-  V1_3("1.3-debian10", "2.11"),
-  V1_4("1.4-debian10", "2.11"),
-  V1_5("1.5-debian10", "2.12"),
-  V2_0("2.0-debian10", "2.12");
+import org.apache.spark.sql.SparkSession;
 
-  final private String imageVersion;
-  final private String scalaVersion;
+protected class SparkBigQueryIntegrationTestBase {
 
-  DataprocImage(String imageVersion, String scalaVersion) {
-    this.imageVersion = imageVersion;
-    this.scalaVersion = scalaVersion;
-  }
+  protected SparkSession spark;
 
-  public String getImageVersion() {
-    return imageVersion;
-  }
-
-  public String getScalaVersion() {
-    return scalaVersion;
+  public SparkBigQueryIntegrationTestBase(SparkSession spark) {
+    this.spark = spark;
   }
 }

@@ -13,45 +13,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.google.cloud.spark.bigquery.it
+package com.google.cloud.spark.bigquery.integration;
 
-import java.util.UUID
+import java.util.UUID;
 
-import com.google.cloud.bigquery._
-import com.google.cloud.spark.bigquery.{SchemaConverters, TestConstants, TestUtils}
-import com.google.common.base.Preconditions
-import org.apache.spark.bigquery.{BigNumeric, BigQueryDataTypes}
-import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
-import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema
-import org.apache.spark.sql.execution.streaming.MemoryStream
-import org.apache.spark.sql.streaming.OutputMode
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SaveMode, SparkSession}
-import org.scalatest.concurrent.TimeLimits
-import org.scalatest.prop.TableDrivenPropertyChecks
-import org.scalatest.time.SpanSugar._
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSuite, Ignore, Matchers}
+import com.google.cloud.bigquery.*;
+import com.google.common.base.Preconditions;
 
-import scala.collection.JavaConverters._
+import static scala.collection.JavaConverters.*;
 
-@Ignore
-class SparkBigQueryEndToEndWriteITSuite extends FunSuite
-  with BeforeAndAfter
-  with BeforeAndAfterAll
-  with Matchers
-  with TimeLimits
-  with TableDrivenPropertyChecks {
+class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase {
 
-  val TemporaryGcsBucketEnvVariable = "TEMPORARY_GCS_BUCKET"
+  private static final String  TEMPORARY_GCS_BUCKET_ENV_VARIABLE = "TEMPORARY_GCS_BUCKET";
 
-  val temporaryGcsBucket = Preconditions.checkNotNull(
-    System.getenv(TemporaryGcsBucketEnvVariable),
+  private String temporaryGcsBucket = Preconditions.checkNotNull(
+    System.getenv(TEMPORARY_GCS_BUCKET_ENV_VARIABLE),
     "Please set the %s env variable to point to a write enabled GCS bucket",
-    TemporaryGcsBucketEnvVariable)
+      TEMPORARY_GCS_BUCKET_ENV_VARIABLE);
+
   val bq = BigQueryOptions.getDefaultInstance.getService
   private val LIBRARIES_PROJECTS_TABLE = "bigquery-public-data.libraries_io.projects"
   private val ALL_TYPES_TABLE_NAME = "all_types"
-  private var spark: SparkSession = _
   private var testDataset: String = _
 
   private def metadata(key: String, value: String): Metadata = metadata(Map(key -> value))
