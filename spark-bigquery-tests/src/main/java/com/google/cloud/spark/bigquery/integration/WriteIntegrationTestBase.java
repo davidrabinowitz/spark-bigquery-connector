@@ -15,75 +15,94 @@
  */
 package com.google.cloud.spark.bigquery.integration;
 
+import com.google.common.collect.ImmutableMap;
+import java.io.Serializable;
+import java.sql.Timestamp;
+import java.util.Map;
 import java.util.UUID;
 
 import com.google.cloud.bigquery.*;
 import com.google.common.base.Preconditions;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.MetadataBuilder;
+import org.junit.Before;
 
 import static scala.collection.JavaConverters.*;
 
 class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase {
 
   private static final String  TEMPORARY_GCS_BUCKET_ENV_VARIABLE = "TEMPORARY_GCS_BUCKET";
+  private static final String LIBRARIES_PROJECTS_TABLE = "bigquery-public-data.libraries_io.projects";
+  private static final String ALL_TYPES_TABLE_NAME = "all_types";
+  private String testDataset;
+  private String testTable;
+  private BigQuery bq;
 
   private String temporaryGcsBucket = Preconditions.checkNotNull(
     System.getenv(TEMPORARY_GCS_BUCKET_ENV_VARIABLE),
     "Please set the %s env variable to point to a write enabled GCS bucket",
       TEMPORARY_GCS_BUCKET_ENV_VARIABLE);
 
-  val bq = BigQueryOptions.getDefaultInstance.getService
-  private val LIBRARIES_PROJECTS_TABLE = "bigquery-public-data.libraries_io.projects"
-  private val ALL_TYPES_TABLE_NAME = "all_types"
-  private var testDataset: String = _
-
-  private def metadata(key: String, value: String): Metadata = metadata(Map(key -> value))
-
-  private def metadata(map: Map[String, String]): Metadata = {
-    val metadata = new MetadataBuilder()
-    for ((key, value) <- map) {
-      metadata.putString(key, value)
-    }
-    metadata.build()
+  public WriteIntegrationTestBase(SparkSession spark,
+      String testDataset) {
+    super(spark);
+    this.testDataset = testDataset;
+    this.bq = BigQueryOptions.getDefaultInstance().getService()
   }
 
-  before {
+  private Metadata metadata(String key, String value) {
+    return metadata(ImmutableMap.of(key,value));
+  }
+
+  private Metadata metadata(Map<String, String> map) {
+    MetadataBuilder metadata = new MetadataBuilder();
+    map.forEach((key, value) -> metadata.putString(key, value));
+    return metadata.build();
+  }
+
+  @Before public void createTestTableName() {
     // have a fresh table for each test
-    testTable = s"test_${System.nanoTime()}"
+    this.testTable = "test_" + System.nanoTime();
   }
-  private var testTable: String = _
 
-  override def beforeAll: Unit = {
-    spark = TestUtils.getOrCreateSparkSession("SparkBigQueryEndToEndWriteITSuite")
-    //    spark.conf.set("spark.sql.codegen.factoryMode", "NO_CODEGEN")
-    //    System.setProperty("spark.testing", "true")
-    testDataset = s"spark_bigquery_it_${System.currentTimeMillis()}"
-    IntegrationTestUtils.createDataset(testDataset)
-    IntegrationTestUtils.runQuery(
-      TestConstants.ALL_TYPES_TABLE_QUERY_TEMPLATE.format(s"$testDataset.$ALL_TYPES_TABLE_NAME"))
-  }
+  // override def beforeAll: Unit = {
+  //   spark = TestUtils.getOrCreateSparkSession("SparkBigQueryEndToEndWriteITSuite")
+  //   //    spark.conf.set("spark.sql.codegen.factoryMode", "NO_CODEGEN")
+  //   //    System.setProperty("spark.testing", "true")
+  //   testDataset = s"spark_bigquery_it_${System.currentTimeMillis()}"
+  //   IntegrationTestUtils.createDataset(testDataset)
+  //   IntegrationTestUtils.runQuery(
+  //     TestConstants.ALL_TYPES_TABLE_QUERY_TEMPLATE.format(s"$testDataset.$ALL_TYPES_TABLE_NAME"))
+  // }
 
 
   // Write tests. We have four save modes: Append, ErrorIfExists, Ignore and
   // Overwrite. For each there are two behaviours - the table exists or not.
   // See more at http://spark.apache.org/docs/2.3.2/api/java/org/apache/spark/sql/SaveMode.html
 
-  override def afterAll: Unit = {
-    IntegrationTestUtils.deleteDatasetAndTables(testDataset)
-  }
+  // override def afterAll: Unit = {
+  //   IntegrationTestUtils.deleteDatasetAndTables(testDataset)
+  // }
 
-  private def initialData = spark.createDataFrame(spark.sparkContext.parallelize(
+  private Dataset<Row> initialData() { return spark.createDataFrame(spark.sparkContext().parallelize(
     Seq(Person("Abc", Seq(Friend(10, Seq(Link("www.abc.com"))))),
-      Person("Def", Seq(Friend(12, Seq(Link("www.def.com"))))))))
+      Person("Def", Seq(Friend(12, Seq(Link("www.def.com")))))))); }
 
-  private def additonalData = spark.createDataFrame(spark.sparkContext.parallelize(
+  private def additonalData = spark.createDataFrame(spark.sparkContext().parallelize(
     Seq(Person("Xyz", Seq(Friend(10, Seq(Link("www.xyz.com"))))),
       Person("Pqr", Seq(Friend(12, Seq(Link("www.pqr.com"))))))))
 
   // getNumRows returns BigInteger, and it messes up the matchers
-  private def testTableNumberOfRows = bq.getTable(testDataset, testTable).getNumRows.intValue
+  private int testTableNumberOfRows() {
+    return bq.getTable(testDataset, testTable).getNumRows().intValue();
+  }
 
-  private def testPartitionedTableDefinition = bq.getTable(testDataset, testTable + "_partitioned")
-    .getDefinition[StandardTableDefinition]()
+  private StandardTableDefinition testPartitionedTableDefinition() {
+    return bq.getTable(testDataset, testTable + "_partitioned")
+        .getDefinition(); }
 
   private def writeToBigQuery(
                                dataSource: String,
@@ -547,6 +566,4 @@ class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase {
   }
 
 }
-
-case class Data(str: String, t: java.sql.Timestamp)
 
