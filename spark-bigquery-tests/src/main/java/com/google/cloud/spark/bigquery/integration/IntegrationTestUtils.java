@@ -20,6 +20,8 @@ import com.google.cloud.bigquery.BigQueryOptions;
 import com.google.cloud.bigquery.DatasetId;
 import com.google.cloud.bigquery.DatasetInfo;
 import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.MetadataBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,5 +54,9 @@ public class IntegrationTestUtils {
         bq.delete(DatasetId.of(dataset), BigQuery.DatasetDeleteOption.deleteContents());
     }
 
-
+    static Metadata metadata(String key, String value) {
+        MetadataBuilder metadata = new MetadataBuilder();
+        metadata.putString(key, value);
+        return metadata.build();
+    }
 }
