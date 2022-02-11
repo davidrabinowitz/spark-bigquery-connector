@@ -1,5 +1,10 @@
 # Apache Spark SQL connector for Google BigQuery (Beta)
 
+[![GitHub release](https://img.shields.io/github/release/GoogleCloudDataproc/spark-bigquery-connector.svg)](https://github.com/GoogleCloudDataproc/spark-bigquery-connector/releases/latest)
+[![GitHub release date](https://img.shields.io/github/release-date/GoogleCloudDataproc/spark-bigquery-connector.svg)](https://github.com/GoogleCloudDataproc/spark-bigquery-connector/releases/latest)
+[![Code Quality: Java](https://img.shields.io/lgtm/grade/java/g/GoogleCloudDataproc/spark-bigquery-connector.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/GoogleCloudDataproc/spark-bigquery-connector/context:java)
+[![codecov](https://codecov.io/gh/GoogleCloudDataproc/spark-bigquery-connector/branch/master/graph/badge.svg)](https://codecov.io/gh/GoogleCloudDataproc/spark-bigquery-connector)
+
 <!--- TODO(#2): split out into more documents. -->
 
 The connector supports reading [Google BigQuery](https://cloud.google.com/bigquery/) tables into Spark's DataFrames, and writing DataFrames back into BigQuery.
