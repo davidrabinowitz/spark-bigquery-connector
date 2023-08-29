@@ -31,12 +31,7 @@
     </dependency>
     <dependency>
       <groupId>${project.groupId}</groupId>
-      <artifactId>spark-bigquery-dsv1-spark2-support</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>${project.groupId}</groupId>
-      <artifactId>spark-bigquery-dsv1-spark3-support</artifactId>
+      <artifactId>spark-bigquery-spark2-support</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>

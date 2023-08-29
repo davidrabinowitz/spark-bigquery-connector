@@ -57,11 +57,6 @@
       <dependencies>
         <dependency>
           <groupId>${project.groupId}</groupId>
-          <artifactId>spark-bigquery-dsv1-spark3-support</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>${project.groupId}</groupId>
           <artifactId>spark-bigquery_2.11</artifactId>
           <version>${project.version}</version>
         </dependency>
@@ -100,11 +95,6 @@
       <dependencies>
         <dependency>
           <groupId>${project.groupId}</groupId>
-          <artifactId>spark-bigquery-dsv1-spark3-support</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>${project.groupId}</groupId>
           <artifactId>spark-bigquery_2.11</artifactId>
           <version>${project.version}</version>
         </dependency>
@@ -133,11 +123,6 @@
       <dependencies>
         <dependency>
           <groupId>${project.groupId}</groupId>
-          <artifactId>spark-bigquery-dsv1-spark3-support</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>${project.groupId}</groupId>
           <artifactId>spark-bigquery_2.11</artifactId>
           <version>${project.version}</version>
         </dependency>
@@ -154,11 +139,6 @@
         <activeByDefault>false</activeByDefault>
       </activation>
       <dependencies>
-        <dependency>
-          <groupId>${project.groupId}</groupId>
-          <artifactId>spark-bigquery-dsv1-spark3-support</artifactId>
-          <version>${project.version}</version>
-        </dependency>
         <dependency>
           <groupId>${project.groupId}</groupId>
           <artifactId>spark-bigquery_2.12</artifactId>
@@ -192,11 +172,6 @@
         <activeByDefault>false</activeByDefault>
       </activation>
       <dependencies>
-        <dependency>
-          <groupId>${project.groupId}</groupId>
-          <artifactId>spark-bigquery-dsv1-spark3-support</artifactId>
-          <version>${project.version}</version>
-        </dependency>
         <dependency>
           <groupId>${project.groupId}</groupId>
           <artifactId>spark-bigquery_2.13</artifactId>
