@@ -59,6 +59,12 @@
       <version>${project.parent.version}</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.openlineage</groupId>
+      <artifactId>openlineage-spark_${scala.binary.version}</artifactId>
+      <version>1.10.2</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <plugins>

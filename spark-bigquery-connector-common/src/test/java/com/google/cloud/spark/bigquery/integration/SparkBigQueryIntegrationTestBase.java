@@ -15,6 +15,7 @@
  */
 package com.google.cloud.spark.bigquery.integration;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.spark.sql.SparkSession;
 import org.junit.Before;
 import org.junit.ClassRule;
@@ -38,19 +39,26 @@ public class SparkBigQueryIntegrationTestBase {
   }
 
   protected static class SparkFactory extends ExternalResource {
+
     SparkSession spark;
 
     @Override
     protected void before() throws Throwable {
-      spark =
-          SparkSession.builder()
-              .master("local")
-              .config("spark.ui.enabled", "false")
-              .config("spark.default.parallelism", 20)
-              .getOrCreate();
-      // reducing test's logs
-      spark.sparkContext().setLogLevel("WARN");
+      spark = createSparkSession(ImmutableMap.of());
     }
+  }
+
+  protected static SparkSession createSparkSession(ImmutableMap<String, String> configuration) {
+    SparkSession.Builder builder =
+        SparkSession.builder()
+            .master("local")
+            .config("spark.ui.enabled", "false")
+            .config("spark.default.parallelism", 20);
+    configuration.forEach((key, value) -> builder.config(key, value));
+    SparkSession spark = builder.getOrCreate();
+    // reducing test's logs
+    spark.sparkContext().setLogLevel("WARN");
+    return spark;
   }
 
   protected static class TestDataset extends ExternalResource {

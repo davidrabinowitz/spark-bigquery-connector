@@ -16,7 +16,13 @@
 package com.google.cloud.spark.bigquery.integration;
 
 import com.google.cloud.spark.bigquery.SparkBigQueryConfig;
+import com.google.common.collect.ImmutableMap;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SaveMode;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.types.DataTypes;
+import org.junit.Test;
 
 public class Spark35DirectWriteIntegrationTest extends WriteIntegrationTestBase {
 
@@ -25,4 +31,32 @@ public class Spark35DirectWriteIntegrationTest extends WriteIntegrationTestBase 
   }
 
   // tests from superclass
+
+  @Test
+  public void foo() throws Exception {
+    SparkSession sparkSession =
+        createSparkSession(
+            ImmutableMap.of(
+                "spark.extraListeners", "io.openlineage.spark.agent.OpenLineageSparkListener"));
+
+    // create source table
+    String sourceTable = testTable + "_source";
+    IntegrationTestUtils.runQuery(
+        String.format("CREATE TABLE `%s.%s` COPY `bigquery-public-data.samples.shakespeare`"));
+
+    // read
+    Dataset<Row> df =
+        sparkSession
+            .read()
+            .format("bigquery")
+            .option("Dataset", testDataset.toString())
+            .option("table", sourceTable)
+            .load();
+
+    // write
+    // table is "fullTableName"
+    writeToBigQuery(df, SaveMode.ErrorIfExists, "AVRO");
+
+    // Analyze OpenLineage
+  }
 }
