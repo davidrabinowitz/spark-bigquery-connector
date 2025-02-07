@@ -3,6 +3,7 @@
 ## Next
 * PR #1333: Initial implementation of a BigQuery backed Spark Catalog
 * PR #1335: Adding indirect write GCS cleanup logs
+* CVE-2024-23082: commons-io has been upgraded to version 2.18.0
 * BigQuery API has been upgraded to version 2.47.0
 * BigQuery Storage API has been upgraded to version 3.11.2
 * GAX has been upgraded to version 2.60.0
