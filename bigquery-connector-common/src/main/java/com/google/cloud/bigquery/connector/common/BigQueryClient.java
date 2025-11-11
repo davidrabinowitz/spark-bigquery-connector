@@ -29,6 +29,7 @@ import com.google.cloud.RetryOption;
 import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.Clustering;
+import com.google.cloud.bigquery.CopyJobConfiguration;
 import com.google.cloud.bigquery.Dataset;
 import com.google.cloud.bigquery.DatasetId;
 import com.google.cloud.bigquery.DatasetInfo;
@@ -163,6 +164,7 @@ public class BigQueryClient {
    * @param job The {@code Job} to keep track of.
    */
   public JobInfo waitForJob(Job job) {
+    log.debug("About to run job {}", job);
     try {
       Job completedJob =
           job.waitFor(
@@ -179,6 +181,7 @@ public class BigQueryClient {
             String.format("Job aborted due to timeout  : %s minutes", bigQueryJobTimeoutInMinutes));
       }
       jobCompletionListener.ifPresent(jcl -> jcl.accept(completedJob));
+      log.debug("Finished running job {}", completedJob);
       return completedJob;
     } catch (InterruptedException e) {
       throw new RuntimeException(
@@ -316,18 +319,11 @@ public class BigQueryClient {
       TableId sourceTableId,
       TableId destinationTableId,
       JobInfo.WriteDisposition writeDisposition) {
-    String queryFormat = "SELECT * FROM `%s`";
-    String temporaryTableName = fullTableName(sourceTableId);
-    String sqlQuery = String.format(queryFormat, temporaryTableName);
-    QueryJobConfiguration queryConfig =
+    CopyJobConfiguration jobConfig =
         jobConfigurationFactory
-            .createQueryJobConfigurationBuilder(sqlQuery, Collections.emptyMap())
-            .setUseLegacySql(false)
-            .setDestinationTable(destinationTableId)
-            .setWriteDisposition(writeDisposition)
+            .createCopyJobConfigurationBuilder(sourceTableId, destinationTableId, writeDisposition)
             .build();
-
-    return create(JobInfo.newBuilder(queryConfig).build());
+    return create(JobInfo.newBuilder(jobConfig).build());
   }
 
   public boolean isTablePartitioned(TableId tableId) {
@@ -1174,6 +1170,17 @@ public class BigQueryClient {
     public JobConfigurationFactory(Map<String, String> labels, Priority queryJobPriority) {
       this.labels = ImmutableMap.copyOf(labels);
       this.queryJobPriority = queryJobPriority;
+    }
+
+    CopyJobConfiguration.Builder createCopyJobConfigurationBuilder(
+        TableId sourceTable, TableId destinationTable, JobInfo.WriteDisposition writeDisposition) {
+      CopyJobConfiguration.Builder builder =
+          CopyJobConfiguration.newBuilder(destinationTable, sourceTable)
+              .setWriteDisposition(writeDisposition);
+      if (labels != null && !labels.isEmpty()) {
+        builder.setLabels(labels);
+      }
+      return builder;
     }
 
     QueryJobConfiguration.Builder createQueryJobConfigurationBuilder(
