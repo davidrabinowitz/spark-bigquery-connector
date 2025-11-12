@@ -257,6 +257,9 @@ public class BigQueryDirectDataSourceWriterContext implements DataSourceWriterCo
 
     if (writingMode.equals(WritingMode.APPEND_AT_LEAST_ONCE)
         || writingMode.equals(WritingMode.OVERWRITE)) {
+      logger.debug(
+          "Writing mode is [{}], will run a BigQuery job to move the data to the destination table",
+          writingMode);
       Job queryJob =
           (writingMode.equals(WritingMode.OVERWRITE))
               ? overwriteMode == PartitionOverwriteMode.STATIC

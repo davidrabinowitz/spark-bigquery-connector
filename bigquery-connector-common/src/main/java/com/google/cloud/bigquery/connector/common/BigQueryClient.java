@@ -319,11 +319,18 @@ public class BigQueryClient {
       TableId sourceTableId,
       TableId destinationTableId,
       JobInfo.WriteDisposition writeDisposition) {
-    CopyJobConfiguration jobConfig =
+    String queryFormat = "SELECT * FROM `%s`";
+    String temporaryTableName = fullTableName(sourceTableId);
+    String sqlQuery = String.format(queryFormat, temporaryTableName);
+    QueryJobConfiguration queryConfig =
         jobConfigurationFactory
-            .createCopyJobConfigurationBuilder(sourceTableId, destinationTableId, writeDisposition)
+            .createQueryJobConfigurationBuilder(sqlQuery, Collections.emptyMap())
+            .setUseLegacySql(false)
+            .setDestinationTable(destinationTableId)
+            .setWriteDisposition(writeDisposition)
             .build();
-    return create(JobInfo.newBuilder(jobConfig).build());
+
+    return create(JobInfo.newBuilder(queryConfig).build());
   }
 
   public boolean isTablePartitioned(TableId tableId) {
@@ -398,23 +405,8 @@ public class BigQueryClient {
    */
   public Job overwriteDestinationWithTemporary(
       TableId temporaryTableId, TableId destinationTableId) {
-    String queryFormat =
-        "MERGE `%s`\n"
-            + "USING (SELECT * FROM `%s`)\n"
-            + "ON FALSE\n"
-            + "WHEN NOT MATCHED THEN INSERT ROW\n"
-            + "WHEN NOT MATCHED BY SOURCE THEN DELETE";
-
-    String destinationTableName = fullTableName(destinationTableId);
-    String temporaryTableName = fullTableName(temporaryTableId);
-    String sqlQuery = String.format(queryFormat, destinationTableName, temporaryTableName);
-    QueryJobConfiguration queryConfig =
-        jobConfigurationFactory
-            .createQueryJobConfigurationBuilder(sqlQuery, Collections.emptyMap())
-            .setUseLegacySql(false)
-            .build();
-
-    return create(JobInfo.newBuilder(queryConfig).build());
+    return copyData(
+        temporaryTableId, destinationTableId, JobInfo.WriteDisposition.WRITE_TRUNCATE_DATA);
   }
 
   /**
