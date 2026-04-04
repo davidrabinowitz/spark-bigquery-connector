@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ArrowReaderIterator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">ArrowReaderIterator.java</span></div><h1>ArrowReaderIterator.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.Iterator;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.ipc.ArrowReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class ArrowReaderIterator implements Iterator&lt;VectorSchemaRoot&gt; {
+
+<span class="nc" id="L28">  private static final Logger log = LoggerFactory.getLogger(ArrowReaderIterator.class);</span>
+<span class="nc" id="L29">  boolean closed = false;</span>
+<span class="nc" id="L30">  VectorSchemaRoot current = null;</span>
+  ArrowReader reader;
+
+<span class="nc" id="L33">  public ArrowReaderIterator(ArrowReader reader) {</span>
+<span class="nc" id="L34">    this.reader = reader;</span>
+<span class="nc" id="L35">  }</span>
+
+  @Override
+  public boolean hasNext() {
+<span class="nc bnc" id="L39" title="All 2 branches missed.">    if (current != null) {</span>
+<span class="nc" id="L40">      return true;</span>
+    }
+
+<span class="nc bnc" id="L43" title="All 2 branches missed.">    if (closed) {</span>
+<span class="nc" id="L44">      return false;</span>
+    }
+
+    try {
+<span class="nc" id="L48">      boolean res = reader.loadNextBatch();</span>
+<span class="nc bnc" id="L49" title="All 2 branches missed.">      if (res) {</span>
+<span class="nc" id="L50">        current = reader.getVectorSchemaRoot();</span>
+      } else {
+<span class="nc" id="L52">        ensureClosed();</span>
+      }
+<span class="nc" id="L54">      return res;</span>
+<span class="nc" id="L55">    } catch (IOException e) {</span>
+<span class="nc" id="L56">      throw new UncheckedIOException(&quot;Failed to load the next arrow batch&quot;, e);</span>
+    }
+  }
+
+  @Override
+  public VectorSchemaRoot next() {
+<span class="nc" id="L62">    VectorSchemaRoot res = current;</span>
+<span class="nc" id="L63">    current = null;</span>
+<span class="nc" id="L64">    return res;</span>
+  }
+
+  private void ensureClosed() throws IOException {
+<span class="nc bnc" id="L68" title="All 2 branches missed.">    if (!closed) {</span>
+<span class="nc" id="L69">      reader.close();</span>
+<span class="nc" id="L70">      closed = true;</span>
+    }
+<span class="nc" id="L72">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

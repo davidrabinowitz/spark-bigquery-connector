@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>LazyInitializationSupplier.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">LazyInitializationSupplier.java</span></div><h1>LazyInitializationSupplier.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2024 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+
+import com.google.common.base.Supplier;
+import javax.annotation.CheckForNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+/*
+ * This class is adapted from MemoizingSupplier of Google's Guava library.
+ * A separate class is added to be able to access initialized variable to check if the value is already built.
+ */
+public class LazyInitializationSupplier&lt;T extends @Nullable Object&gt; implements Supplier&lt;T&gt; {
+  final Supplier&lt;T&gt; delegate;
+  volatile boolean initialized;
+  @CheckForNull transient T value;
+
+<span class="fc" id="L33">  public LazyInitializationSupplier(Supplier&lt;T&gt; delegate) {</span>
+<span class="fc" id="L34">    this.delegate = checkNotNull(delegate);</span>
+<span class="fc" id="L35">  }</span>
+
+  @Override
+  public T get() {
+<span class="fc bfc" id="L39" title="All 2 branches covered.">    if (!initialized) {</span>
+<span class="fc" id="L40">      synchronized (this) {</span>
+<span class="fc bfc" id="L41" title="All 2 branches covered.">        if (!initialized) {</span>
+<span class="fc" id="L42">          T t = delegate.get();</span>
+<span class="fc" id="L43">          value = t;</span>
+<span class="fc" id="L44">          initialized = true;</span>
+<span class="fc" id="L45">          return t;</span>
+        }
+<span class="fc" id="L47">      }</span>
+    }
+<span class="fc" id="L49">    return value;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc bnc" id="L54" title="All 2 branches missed.">    return &quot;Suppliers.memoize(&quot;</span>
+        + (initialized ? &quot;&lt;supplier that returned &quot; + value + &quot;&gt;&quot; : delegate)
+        + &quot;)&quot;;
+  }
+
+  public boolean isInitialized() {
+<span class="fc" id="L60">    return initialized;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

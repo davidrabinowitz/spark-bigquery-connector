@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ReadRowsHelper.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">ReadRowsHelper.java</span></div><h1>ReadRowsHelper.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import static java.util.Objects.requireNonNull;
+
+import com.google.cloud.bigquery.storage.v1.BigQueryReadClient;
+import com.google.cloud.bigquery.storage.v1.ReadRowsRequest;
+import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
+import com.google.common.collect.ImmutableList;
+import java.io.Serializable;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class ReadRowsHelper implements AutoCloseable {
+<span class="fc" id="L33">  private static final Logger logger = LoggerFactory.getLogger(ReadRowsHelper.class);</span>
+  private final Options options;
+  private final Optional&lt;BigQueryStorageReadRowsTracer&gt; bigQueryStorageReadRowsTracer;
+
+  public static final class Options implements Serializable {
+    private static final long serialVersionUID = 1424573701386718509L;
+    private final int maxReadRowsRetries;
+    private final String nullableEndpoint;
+    private final int backgroundParsingThreads;
+    private final int prebufferResponses;
+
+    public Options(
+        int maxReadRowsRetries,
+        Optional&lt;String&gt; endpoint,
+        int backgroundParsingThreads,
+<span class="fc" id="L48">        int prebufferResponses) {</span>
+<span class="fc" id="L49">      this.maxReadRowsRetries = maxReadRowsRetries;</span>
+<span class="fc" id="L50">      this.nullableEndpoint = endpoint.orElse(null);</span>
+<span class="fc" id="L51">      this.backgroundParsingThreads = backgroundParsingThreads;</span>
+<span class="fc" id="L52">      this.prebufferResponses = prebufferResponses;</span>
+<span class="fc" id="L53">    }</span>
+
+    public int getMaxReadRowsRetries() {
+<span class="fc" id="L56">      return maxReadRowsRetries;</span>
+    }
+
+    public Optional&lt;String&gt; getEndpoint() {
+<span class="nc" id="L60">      return Optional.ofNullable(nullableEndpoint);</span>
+    }
+
+    public int numBackgroundThreads() {
+<span class="fc" id="L64">      return backgroundParsingThreads;</span>
+    }
+
+    public int numPrebufferResponses() {
+<span class="nc" id="L68">      return prebufferResponses;</span>
+    }
+  }
+
+  private final BigQueryClientFactory bigQueryReadClientFactory;
+  private final List&lt;ReadRowsRequest.Builder&gt; requests;
+  private StreamCombiningIterator incomingStream;
+
+  public ReadRowsHelper(
+      BigQueryClientFactory bigQueryReadClientFactory,
+      ReadRowsRequest.Builder request,
+      Options options,
+<span class="fc" id="L80">      Optional&lt;BigQueryStorageReadRowsTracer&gt; bigQueryStorageReadRowsTracer) {</span>
+<span class="fc" id="L81">    this.bigQueryReadClientFactory =</span>
+<span class="fc" id="L82">        requireNonNull(bigQueryReadClientFactory, &quot;bigQueryReadClientFactory cannot be null&quot;);</span>
+<span class="fc" id="L83">    this.requests = ImmutableList.of(requireNonNull(request, &quot;request cannot be null&quot;));</span>
+<span class="fc" id="L84">    this.options = options;</span>
+<span class="fc" id="L85">    this.bigQueryStorageReadRowsTracer = bigQueryStorageReadRowsTracer;</span>
+<span class="fc" id="L86">  }</span>
+
+  public ReadRowsHelper(
+      BigQueryClientFactory bigQueryReadClientFactory,
+      List&lt;ReadRowsRequest.Builder&gt; requests,
+<span class="fc" id="L91">      Options options) {</span>
+<span class="fc" id="L92">    this.bigQueryReadClientFactory =</span>
+<span class="fc" id="L93">        requireNonNull(bigQueryReadClientFactory, &quot;bigQueryReadClientFactory cannot be null&quot;);</span>
+<span class="fc" id="L94">    this.requests = requireNonNull(requests, &quot;request cannot be null&quot;);</span>
+<span class="fc" id="L95">    this.options = options;</span>
+<span class="fc" id="L96">    this.bigQueryStorageReadRowsTracer = Optional.empty();</span>
+<span class="fc" id="L97">  }</span>
+
+  public Iterator&lt;ReadRowsResponse&gt; readRows() {
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">    if (requests.isEmpty()) {</span>
+      // Partition is empty, probably due to dynamic partition pruning. Cannot return
+      // StreamCombiningIterator as it
+      // requires at least one request
+<span class="nc" id="L104">      return Collections.emptyIterator();</span>
+    }
+<span class="pc" id="L106">    bigQueryStorageReadRowsTracer.ifPresent(tracer -&gt; tracer.startStream());</span>
+<span class="fc" id="L107">    BigQueryReadClient client = bigQueryReadClientFactory.getBigQueryReadClient();</span>
+
+<span class="fc" id="L109">    incomingStream =</span>
+        new StreamCombiningIterator(
+<span class="fc" id="L111">            client, requests, options.prebufferResponses, options.getMaxReadRowsRetries());</span>
+<span class="fc" id="L112">    return incomingStream;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L117">    return requests.toString();</span>
+  }
+
+  @Override
+  public void close() {
+<span class="pc bpc" id="L122" title="1 of 2 branches missed.">    if (incomingStream != null) {</span>
+      try {
+        // There appears to be a race when calling cancel for an already
+        // consumed stream can cause an exception to be thrown. Since
+        // this is part of the shutdown process, it should be safe to
+        // ignore the error.
+<span class="fc" id="L128">        incomingStream.cancel();</span>
+<span class="nc" id="L129">      } catch (Exception e) {</span>
+<span class="nc" id="L130">        logger.debug(&quot;Error on cancel call&quot;, e);</span>
+<span class="fc" id="L131">      }</span>
+<span class="fc" id="L132">      incomingStream = null;</span>
+    }
+<span class="fc" id="L134">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

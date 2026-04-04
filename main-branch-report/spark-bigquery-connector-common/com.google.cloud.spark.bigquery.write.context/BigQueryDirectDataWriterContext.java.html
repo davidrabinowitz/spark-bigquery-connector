@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryDirectDataWriterContext.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.write.context</a> &gt; <span class="el_source">BigQueryDirectDataWriterContext.java</span></div><h1>BigQueryDirectDataWriterContext.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.write.context;
+
+import static com.google.cloud.spark.bigquery.ProtobufUtils.ProtobufSchemaFieldCacheEntry;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.buildSingleRowMessage;
+import static com.google.cloud.spark.bigquery.ProtobufUtils.toDescriptor;
+
+import com.google.api.gax.retrying.RetrySettings;
+import com.google.cloud.bigquery.connector.common.BigQueryClientFactory;
+import com.google.cloud.bigquery.connector.common.BigQueryConnectorException;
+import com.google.cloud.bigquery.connector.common.BigQueryDirectDataWriterHelper;
+import com.google.cloud.bigquery.connector.common.WriteStreamStatistics;
+import com.google.cloud.bigquery.storage.v1.ProtoSchema;
+import com.google.common.base.Optional;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.DynamicMessage;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class BigQueryDirectDataWriterContext implements DataWriterContext&lt;InternalRow&gt; {
+<span class="fc" id="L41">  final Logger logger = LoggerFactory.getLogger(BigQueryDirectDataWriterContext.class);</span>
+
+  private final int partitionId;
+  private final long taskId;
+  private final long epochId;
+  private final String tablePath;
+  private final StructType sparkSchema;
+  private final Descriptors.Descriptor schemaDescriptor;
+  private final Map&lt;Integer, ProtobufSchemaFieldCacheEntry&gt; fieldIndexToEntryMap;
+  private final DynamicMessage.Builder messageBuilder;
+
+  /**
+   * A helper object to assist the BigQueryDataWriter with all the writing: essentially does all the
+   * interaction with BigQuery Storage Write API.
+   */
+  private BigQueryDirectDataWriterHelper writerHelper;
+
+  public BigQueryDirectDataWriterContext(
+      int partitionId,
+      long taskId,
+      long epochId,
+      BigQueryClientFactory writeClientFactory,
+      String tablePath,
+      StructType sparkSchema,
+      ProtoSchema protoSchema,
+      RetrySettings bigqueryDataWriterHelperRetrySettings,
+      Optional&lt;String&gt; traceId,
+<span class="fc" id="L68">      boolean writeAtLeastOnce) {</span>
+<span class="fc" id="L69">    this.partitionId = partitionId;</span>
+<span class="fc" id="L70">    this.taskId = taskId;</span>
+<span class="fc" id="L71">    this.epochId = epochId;</span>
+<span class="fc" id="L72">    this.tablePath = tablePath;</span>
+<span class="fc" id="L73">    this.sparkSchema = sparkSchema;</span>
+    try {
+<span class="fc" id="L75">      this.schemaDescriptor = toDescriptor(sparkSchema);</span>
+<span class="nc" id="L76">    } catch (Descriptors.DescriptorValidationException e) {</span>
+<span class="nc" id="L77">      throw new BigQueryConnectorException.InvalidSchemaException(</span>
+          &quot;Could not convert spark-schema to descriptor object&quot;, e);
+<span class="fc" id="L79">    }</span>
+<span class="fc" id="L80">    this.fieldIndexToEntryMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L81">    this.messageBuilder = DynamicMessage.newBuilder(this.schemaDescriptor);</span>
+
+<span class="fc" id="L83">    this.writerHelper =</span>
+        new BigQueryDirectDataWriterHelper(
+            writeClientFactory,
+            tablePath,
+            protoSchema,
+            bigqueryDataWriterHelperRetrySettings,
+            traceId,
+            partitionId,
+            writeAtLeastOnce);
+<span class="fc" id="L92">  }</span>
+
+  @Override
+  public void write(InternalRow record) throws IOException {
+<span class="fc" id="L96">    ByteString message =</span>
+<span class="fc" id="L97">        buildSingleRowMessage(</span>
+                sparkSchema,
+                schemaDescriptor,
+                record,
+<span class="fc" id="L101">                java.util.Optional.of(fieldIndexToEntryMap),</span>
+                messageBuilder)
+<span class="fc" id="L103">            .toByteString();</span>
+<span class="fc" id="L104">    writerHelper.addRow(message);</span>
+<span class="fc" id="L105">  }</span>
+
+  @Override
+  public WriterCommitMessageContext commit() throws IOException {
+<span class="fc" id="L109">    logger.debug(&quot;Data Writer {} finalizeStream()&quot;, partitionId);</span>
+
+<span class="fc" id="L111">    WriteStreamStatistics stats = writerHelper.finalizeStream();</span>
+<span class="fc" id="L112">    String writeStreamName = writerHelper.getWriteStreamName();</span>
+
+<span class="fc" id="L114">    logger.debug(</span>
+        &quot;Data Writer {}'s write-stream has finalized with row count: {}&quot;,
+<span class="fc" id="L116">        partitionId,</span>
+<span class="fc" id="L117">        stats.getRowCount());</span>
+
+<span class="fc" id="L119">    return new BigQueryDirectWriterCommitMessageContext(</span>
+        writeStreamName,
+        partitionId,
+        taskId,
+        epochId,
+        tablePath,
+<span class="fc" id="L125">        stats.getRowCount(),</span>
+<span class="fc" id="L126">        stats.getBytesWritten());</span>
+  }
+
+  @Override
+  public void abort() throws IOException {
+<span class="fc" id="L131">    logger.debug(&quot;Data Writer {} abort()&quot;, partitionId);</span>
+<span class="fc" id="L132">    writerHelper.abort();</span>
+<span class="fc" id="L133">  }</span>
+
+  @Override
+  public void close() throws IOException {
+    // empty
+<span class="fc" id="L138">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

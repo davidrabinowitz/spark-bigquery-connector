@@ -1,0 +1,402 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryCatalog.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-3.5-bigquery-lib</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery</a> &gt; <span class="el_source">BigQueryCatalog.java</span></div><h1>BigQueryCatalog.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2025 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery;
+
+import com.google.api.client.googleapis.json.GoogleJsonResponseException;
+import com.google.cloud.bigquery.BigQueryException;
+import com.google.cloud.bigquery.Dataset;
+import com.google.cloud.bigquery.DatasetId;
+import com.google.cloud.bigquery.DatasetInfo;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.bigquery.connector.common.BigQueryConnectorException;
+import com.google.cloud.spark.bigquery.v2.BigQueryIdentifier;
+import com.google.cloud.spark.bigquery.v2.Spark35BigQueryTable;
+import com.google.cloud.spark.bigquery.v2.Spark3Util;
+import com.google.common.base.Preconditions;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Streams;
+import com.google.inject.Injector;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.Optional;
+import java.util.ServiceLoader;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.StreamSupport;
+import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
+import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException;
+import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
+import org.apache.spark.sql.connector.catalog.Table;
+import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.catalog.TableProvider;
+import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.sources.DataSourceRegister;
+import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.util.CaseInsensitiveStringMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+<span class="nc" id="L66">public class BigQueryCatalog implements TableCatalog, SupportsNamespaces {</span>
+
+<span class="nc" id="L68">  private static final Logger logger = LoggerFactory.getLogger(BigQueryCatalog.class);</span>
+<span class="nc" id="L69">  private static final String[] DEFAULT_NAMESPACE = {&quot;default&quot;};</span>
+
+<span class="nc" id="L71">  private static final Cache&lt;String, Table&gt; identifierToTableCache =</span>
+<span class="nc" id="L72">      CacheBuilder.newBuilder().expireAfterWrite(30, TimeUnit.MINUTES).maximumSize(1000).build();</span>
+<span class="nc" id="L73">  private final LoadingCache&lt;String[], Boolean&gt; datasetExistenceCache =</span>
+<span class="nc" id="L74">      CacheBuilder.newBuilder()</span>
+<span class="nc" id="L75">          .maximumSize(1000)</span>
+<span class="nc" id="L76">          .expireAfterWrite(15, TimeUnit.MINUTES)</span>
+<span class="nc" id="L77">          .build(CacheLoader.from(this::bigQueryDatasetExists));</span>
+  private TableProvider tableProvider;
+  private BigQueryClient bigQueryClient;
+  private SchemaConverters schemaConverters;
+  private Map&lt;String, String&gt; options;
+
+  @Override
+  public void initialize(String name, CaseInsensitiveStringMap caseInsensitiveStringMap) {
+<span class="nc" id="L85">    logger.info(</span>
+        &quot;Initializing BigQuery table catalog [{}] with options: {}&quot;,
+        name,
+        caseInsensitiveStringMap);
+<span class="nc" id="L89">    this.options = caseInsensitiveStringMap.asCaseSensitiveMap();</span>
+
+    try {
+<span class="nc" id="L92">      Injector injector =</span>
+          new InjectorBuilder()
+<span class="nc" id="L94">              .withOptions(caseInsensitiveStringMap.asCaseSensitiveMap())</span>
+<span class="nc" id="L95">              .withTableIsMandatory(false)</span>
+<span class="nc" id="L96">              .build();</span>
+<span class="nc" id="L97">      tableProvider =</span>
+<span class="nc" id="L98">          StreamSupport.stream(ServiceLoader.load(DataSourceRegister.class).spliterator(), false)</span>
+<span class="nc" id="L99">              .filter(candidate -&gt; candidate.shortName().equals(&quot;bigquery&quot;))</span>
+<span class="nc" id="L100">              .map(candidate -&gt; (TableProvider) candidate)</span>
+<span class="nc" id="L101">              .findFirst()</span>
+<span class="nc" id="L102">              .orElseThrow(</span>
+<span class="nc" id="L103">                  () -&gt; new IllegalStateException(&quot;Could not find a BigQuery TableProvider&quot;));</span>
+<span class="nc" id="L104">      bigQueryClient = injector.getInstance(BigQueryClient.class);</span>
+<span class="nc" id="L105">      schemaConverters =</span>
+<span class="nc" id="L106">          SchemaConverters.from(</span>
+<span class="nc" id="L107">              SchemaConvertersConfiguration.from(injector.getInstance(SparkBigQueryConfig.class)));</span>
+<span class="nc" id="L108">      logger.info(&quot;BigQuery table catalog [{}] initialized successfully&quot;, name);</span>
+<span class="nc" id="L109">    } catch (Exception e) {</span>
+<span class="nc" id="L110">      logger.error(&quot;Failed to initialize BigQuery catalog [{}]&quot;, name, e);</span>
+<span class="nc" id="L111">      throw new BigQueryConnectorException(&quot;Failed to initialize BigQuery catalog: &quot; + name, e);</span>
+<span class="nc" id="L112">    }</span>
+<span class="nc" id="L113">  }</span>
+
+  @Override
+  public String name() {
+<span class="nc" id="L117">    return &quot;bigquery&quot;;</span>
+  }
+
+  @Override
+  public String[] defaultNamespace() {
+<span class="nc" id="L122">    return DEFAULT_NAMESPACE;</span>
+  }
+
+  @Override
+  public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
+<span class="nc" id="L127">    Preconditions.checkNotNull(namespace, &quot;namespace cannot be null&quot;);</span>
+<span class="nc bnc" id="L128" title="All 2 branches missed.">    Preconditions.checkArgument(namespace.length == 1, &quot;BigQuery supports only one namespace&quot;);</span>
+<span class="nc" id="L129">    logger.debug(&quot;list tables [{}])&quot;, namespace[0]);</span>
+<span class="nc" id="L130">    DatasetId datasetId = DatasetId.of(namespace[0]);</span>
+    try {
+<span class="nc" id="L132">      return StreamSupport.stream(</span>
+<span class="nc" id="L133">              bigQueryClient.listTables(datasetId, TableDefinition.Type.TABLE).spliterator(), false)</span>
+<span class="nc" id="L134">          .map(com.google.cloud.bigquery.Table::getTableId)</span>
+<span class="nc" id="L135">          .map(BigQueryIdentifier::of)</span>
+<span class="nc" id="L136">          .toArray(BigQueryIdentifier[]::new);</span>
+<span class="nc" id="L137">    } catch (BigQueryException e) {</span>
+<span class="nc bnc" id="L138" title="All 4 branches missed.">      if (e.getCause() != null &amp;&amp; e.getCause() instanceof GoogleJsonResponseException) {</span>
+<span class="nc" id="L139">        GoogleJsonResponseException gsre = (GoogleJsonResponseException) e.getCause();</span>
+<span class="nc bnc" id="L140" title="All 2 branches missed.">        if (gsre.getStatusCode() == 404) {</span>
+          // the dataset does not exist
+<span class="nc" id="L142">          logger.debug(&quot;Dataset does not exist&quot;, e);</span>
+<span class="nc" id="L143">          throw new NoSuchNamespaceException(namespace);</span>
+        }
+      }
+<span class="nc" id="L146">      throw new BigQueryConnectorException(</span>
+<span class="nc" id="L147">          &quot;Error listing tables  in &quot; + Arrays.toString(namespace), e);</span>
+    }
+  }
+
+  @Override
+  public Table loadTable(Identifier identifier) throws NoSuchTableException {
+<span class="nc" id="L153">    logger.debug(&quot;loading table [{}])&quot;, format(identifier));</span>
+    try {
+<span class="nc bnc" id="L155" title="All 2 branches missed.">      if (!tableExists(identifier)) {</span>
+<span class="nc" id="L156">        throw new NoSuchBigQueryTableException(identifier);</span>
+      }
+<span class="nc" id="L158">      return identifierToTableCache.get(</span>
+<span class="nc" id="L159">          identifier.toString(),</span>
+          () -&gt;
+              // TODO: reuse injector
+<span class="nc" id="L162">              Spark3Util.createBigQueryTableInstance(</span>
+<span class="nc" id="L163">                  Spark35BigQueryTable::new, null, toLoadProperties(identifier)));</span>
+<span class="nc" id="L164">    } catch (ExecutionException e) {</span>
+<span class="nc" id="L165">      throw new BigQueryConnectorException(&quot;Problem loading table &quot; + identifier, e);</span>
+    }
+  }
+
+  Map&lt;String, String&gt; toLoadProperties(Identifier identifier) {
+<span class="nc" id="L170">    ImmutableMap.Builder&lt;String, String&gt; result = ImmutableMap.builder();</span>
+<span class="nc" id="L171">    Map&lt;String, String&gt; processedOptions = new java.util.HashMap&lt;&gt;(options);</span>
+<span class="nc bnc" id="L172" title="All 2 branches missed.">    if (processedOptions.containsKey(&quot;projectId&quot;)) {</span>
+<span class="nc" id="L173">      processedOptions.put(&quot;project&quot;, processedOptions.remove(&quot;projectId&quot;));</span>
+    }
+<span class="nc" id="L175">    result.putAll(processedOptions);</span>
+<span class="nc bnc" id="L176" title="All 3 branches missed.">    switch (identifier.namespace().length) {</span>
+      case 1:
+<span class="nc" id="L178">        result.put(&quot;dataset&quot;, identifier.namespace()[0]);</span>
+<span class="nc" id="L179">        break;</span>
+      case 2:
+<span class="nc" id="L181">        result.put(&quot;project&quot;, identifier.namespace()[0]);</span>
+<span class="nc" id="L182">        result.put(&quot;dataset&quot;, identifier.namespace()[1]);</span>
+<span class="nc" id="L183">        break;</span>
+      default:
+<span class="nc" id="L185">        throw new IllegalArgumentException(</span>
+            &quot;The identifier [&quot; + identifier + &quot;] is not recognized by BigQuery&quot;);
+    }
+<span class="nc" id="L188">    result.put(&quot;table&quot;, identifier.name());</span>
+<span class="nc" id="L189">    return result.buildKeepingLast();</span>
+  }
+
+  @Override
+  public void invalidateTable(Identifier identifier) {
+<span class="nc" id="L194">    logger.debug(&quot;invalidating table [{}])&quot;, format(identifier));</span>
+<span class="nc" id="L195">    throw new UnsupportedOperationException(&quot;Cannot invalidate table in BigQuery&quot;);</span>
+  }
+
+  @Override
+  public boolean tableExists(Identifier identifier) {
+<span class="nc" id="L200">    logger.debug(&quot;checking existence of table [{}])&quot;, format(identifier));</span>
+<span class="nc" id="L201">    return bigQueryClient.tableExists(toTableId(identifier));</span>
+  }
+
+  TableInfo loadBigQueryTable(Identifier identifier) {
+<span class="nc" id="L205">    return bigQueryClient.getTable(toTableId(identifier));</span>
+  }
+
+  Optional&lt;com.google.api.services.bigquery.model.Table&gt; loadBigQueryRestTable(
+      Identifier identifier) {
+<span class="nc" id="L210">    return bigQueryClient.getRestTable(toTableId(identifier));</span>
+  }
+
+  @Override
+  public Table createTable(
+      Identifier identifier,
+      StructType structType,
+      Transform[] transforms,
+      Map&lt;String, String&gt; properties)
+      throws TableAlreadyExistsException, NoSuchNamespaceException {
+<span class="nc" id="L220">    logger.debug(&quot;creating table [{}])&quot;, format(identifier));</span>
+<span class="nc bnc" id="L221" title="All 2 branches missed.">    if (tableExplicitlySet(properties)) {</span>
+<span class="nc" id="L222">      logger.debug(&quot;Mapping Spark table to BigQuery table)&quot;);</span>
+      // As the table is mapped to an actual table in BigQuery, we are relying on the BigQuery
+      // schema
+      try {
+<span class="nc" id="L226">        return identifierToTableCache.get(</span>
+<span class="nc" id="L227">            identifier.toString(),</span>
+            () -&gt;
+<span class="nc" id="L229">                Spark3Util.createBigQueryTableInstance(</span>
+                    Spark35BigQueryTable::new, /* schema */ null, properties));
+<span class="nc" id="L231">      } catch (ExecutionException e) {</span>
+<span class="nc" id="L232">        throw new BigQueryConnectorException(&quot;Error creating table &quot; + identifier, e);</span>
+      }
+    }
+<span class="nc" id="L235">    Schema schema = schemaConverters.toBigQuerySchema(structType);</span>
+<span class="nc" id="L236">    bigQueryClient.createTable(</span>
+<span class="nc" id="L237">        toTableId(identifier),</span>
+        schema,
+<span class="nc" id="L239">        BigQueryClient.CreateTableOptions.of(</span>
+<span class="nc" id="L240">            Optional.empty(), ImmutableMap.of(), Optional.empty()));</span>
+    ImmutableMap.Builder&lt;String, String&gt; getTableProperties =
+<span class="nc" id="L242">        ImmutableMap.&lt;String, String&gt;builder().putAll(properties);</span>
+    // if the user provided an alternative table we do not want to ignore it
+<span class="nc bnc" id="L244" title="All 2 branches missed.">    if (!tableExplicitlySet(properties)) {</span>
+<span class="nc" id="L245">      getTableProperties.put(&quot;dataset&quot;, identifier.namespace()[0]).put(&quot;table&quot;, identifier.name());</span>
+    }
+    // TODO: Use the table constructor directly using the catalog's injector
+<span class="nc" id="L248">    return tableProvider.getTable(structType, transforms, getTableProperties.buildKeepingLast());</span>
+  }
+
+  private static boolean tableExplicitlySet(Map&lt;String, String&gt; properties) {
+<span class="nc bnc" id="L252" title="All 2 branches missed.">    if (properties.containsKey(&quot;table&quot;)) {</span>
+<span class="nc" id="L253">      return true;</span>
+    }
+<span class="nc bnc" id="L255" title="All 2 branches missed.">    if (properties.containsKey(&quot;path&quot;)) {</span>
+<span class="nc" id="L256">      return true;</span>
+    }
+<span class="nc" id="L258">    return false;</span>
+  }
+
+  @Override
+  public Table alterTable(Identifier identifier, TableChange... tableChanges)
+      throws NoSuchTableException {
+<span class="nc" id="L264">    throw new UnsupportedOperationException(&quot;Cannot alter table in BigQuery&quot;);</span>
+  }
+
+  @Override
+  public boolean dropTable(Identifier identifier) {
+<span class="nc" id="L269">    logger.debug(&quot;dropping table [{}])&quot;, format(identifier));</span>
+<span class="nc" id="L270">    TableId tableId = toTableId(identifier);</span>
+<span class="nc bnc" id="L271" title="All 2 branches missed.">    if (!bigQueryClient.tableExists(tableId)) {</span>
+<span class="nc" id="L272">      return false;</span>
+    }
+<span class="nc bnc" id="L274" title="All 2 branches missed.">    if (bigQueryClient.deleteTable(tableId)) {</span>
+<span class="nc" id="L275">      identifierToTableCache.invalidate(identifier.toString());</span>
+<span class="nc" id="L276">      return true;</span>
+    }
+<span class="nc" id="L278">    return false;</span>
+  }
+
+  @Override
+  public boolean purgeTable(Identifier ident) throws UnsupportedOperationException {
+<span class="nc" id="L283">    throw new UnsupportedOperationException(&quot;Cannot purge table in BigQuery&quot;);</span>
+  }
+
+  @Override
+  public void renameTable(Identifier oldIdent, Identifier newIdent)
+      throws NoSuchTableException, TableAlreadyExistsException {
+<span class="nc" id="L289">    throw new UnsupportedOperationException(&quot;Cannot rename table in BigQuery&quot;);</span>
+  }
+
+  private String format(Identifier identifier) {
+<span class="nc" id="L293">    return String.format(&quot;%s.%s&quot;, Arrays.toString(identifier.namespace()), identifier.name());</span>
+  }
+
+  static TableId toTableId(Identifier identifier) {
+<span class="nc bnc" id="L297" title="All 2 branches missed.">    if (identifier.namespace().length == 1) {</span>
+<span class="nc" id="L298">      return TableId.of(identifier.namespace()[0], identifier.name());</span>
+    }
+<span class="nc bnc" id="L300" title="All 2 branches missed.">    if (identifier.namespace().length == 2) {</span>
+<span class="nc" id="L301">      return TableId.of(identifier.namespace()[0], identifier.namespace()[1], identifier.name());</span>
+    }
+<span class="nc" id="L303">    throw new IllegalArgumentException(</span>
+        &quot;The identifier [&quot; + identifier + &quot;] is not recognized by BigQuery&quot;);
+  }
+
+  @Override
+  public String[][] listNamespaces() throws NoSuchNamespaceException {
+<span class="nc bnc" id="L309" title="All 2 branches missed.">    if (bigQueryClient == null) {</span>
+<span class="nc" id="L310">      throw new IllegalStateException(&quot;BigQuery catalog not properly initialized&quot;);</span>
+    }
+    try {
+<span class="nc" id="L313">      return Streams.stream(bigQueryClient.listDatasets())</span>
+<span class="nc" id="L314">          .map(Dataset::getDatasetId)</span>
+<span class="nc" id="L315">          .map(this::toNamespace)</span>
+<span class="nc" id="L316">          .toArray(String[][]::new);</span>
+<span class="nc" id="L317">    } catch (Exception e) {</span>
+<span class="nc" id="L318">      logger.error(&quot;Error listing namespaces&quot;, e);</span>
+<span class="nc" id="L319">      throw new BigQueryConnectorException(&quot;Failed to list namespaces&quot;, e);</span>
+    }
+  }
+
+  private String[] toNamespace(DatasetId datasetId) {
+<span class="nc" id="L324">    return new String[] {datasetId.getDataset()};</span>
+  }
+
+  private DatasetId toDatasetId(String[] namespace) {
+<span class="nc bnc" id="L328" title="All 3 branches missed.">    switch (namespace.length) {</span>
+      case 1:
+<span class="nc" id="L330">        return DatasetId.of(namespace[0]);</span>
+      case 2:
+<span class="nc" id="L332">        return DatasetId.of(namespace[0], namespace[1]);</span>
+      default:
+<span class="nc" id="L334">        throw new IllegalArgumentException(</span>
+<span class="nc" id="L335">            &quot;The identifier [&quot; + Arrays.toString(namespace) + &quot;] is not recognized by BigQuery&quot;);</span>
+    }
+  }
+
+  // based on JDBCTableCatalog.listNamespaces(namespace)
+  @Override
+  public String[][] listNamespaces(String[] namespace) throws NoSuchNamespaceException {
+<span class="nc bnc" id="L342" title="All 3 branches missed.">    switch (namespace.length) {</span>
+      case 0:
+<span class="nc" id="L344">        return listNamespaces();</span>
+      case 1:
+<span class="nc bnc" id="L346" title="All 2 branches missed.">        if (namespaceExists(namespace)) {</span>
+<span class="nc" id="L347">          return new String[0][];</span>
+        }
+    }
+    // unsupported case
+<span class="nc" id="L351">    throw new NoSuchNamespaceException(namespace);</span>
+  }
+
+  @Override
+  public boolean namespaceExists(String[] namespace) {
+<span class="nc" id="L356">    return datasetExistenceCache.getUnchecked(namespace);</span>
+  }
+
+  private boolean bigQueryDatasetExists(String[] namespace) {
+<span class="nc" id="L360">    return bigQueryClient.datasetExists(toDatasetId(namespace));</span>
+  }
+
+  @Override
+  public Map&lt;String, String&gt; loadNamespaceMetadata(String[] namespace)
+      throws NoSuchNamespaceException {
+<span class="nc" id="L366">    DatasetInfo dataset = bigQueryClient.getDataset(toDatasetId(namespace));</span>
+<span class="nc" id="L367">    ImmutableMap.Builder&lt;String, String&gt; result = ImmutableMap.builder();</span>
+<span class="nc" id="L368">    result.put(&quot;bigquery_location&quot;, dataset.getLocation());</span>
+<span class="nc" id="L369">    result.put(&quot;creationTime&quot;, dataset.getCreationTime().toString());</span>
+<span class="nc" id="L370">    Optional.ofNullable(dataset.getDescription())</span>
+<span class="nc" id="L371">        .ifPresent(description -&gt; result.put(&quot;comment&quot;, description));</span>
+<span class="nc" id="L372">    return result.build();</span>
+  }
+
+  @Override
+  public void createNamespace(String[] namespace, Map&lt;String, String&gt; metadata)
+      throws NamespaceAlreadyExistsException {
+<span class="nc bnc" id="L378" title="All 2 branches missed.">    Preconditions.checkArgument(</span>
+        namespace.length == 1, &quot;BigQuery does not support nested namespaces&quot;);
+<span class="nc bnc" id="L380" title="All 2 branches missed.">    if (namespaceExists(namespace)) {</span>
+<span class="nc" id="L381">      throw new NamespaceAlreadyExistsException(namespace);</span>
+    }
+<span class="nc" id="L383">    bigQueryClient.createDataset(DatasetId.of(namespace[0]), metadata);</span>
+<span class="nc" id="L384">  }</span>
+
+  @Override
+  public void alterNamespace(String[] namespace, NamespaceChange... changes)
+<span class="nc" id="L388">      throws NoSuchNamespaceException {}</span>
+
+  @Override
+  public boolean dropNamespace(String[] namespace, boolean cascade)
+      throws NoSuchNamespaceException, NonEmptyNamespaceException {
+<span class="nc bnc" id="L393" title="All 2 branches missed.">    if (!namespaceExists(namespace)) {</span>
+<span class="nc" id="L394">      throw new NoSuchNamespaceException(namespace);</span>
+    }
+<span class="nc bnc" id="L396" title="All 4 branches missed.">    if (!cascade &amp;&amp; listTables(namespace).length &gt; 0) {</span>
+<span class="nc" id="L397">      throw new NonEmptyNamespaceException(namespace);</span>
+    }
+<span class="nc" id="L399">    return bigQueryClient.deleteDataset(toDatasetId(namespace), cascade);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

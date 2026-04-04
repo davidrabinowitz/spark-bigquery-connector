@@ -1,0 +1,759 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ProtobufUtils.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery</a> &gt; <span class="el_source">ProtobufUtils.java</span></div><h1>ProtobufUtils.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery;
+
+import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.FieldList;
+import com.google.cloud.bigquery.LegacySQLTypeName;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.storage.v1.ProtoRows;
+import com.google.cloud.bigquery.storage.v1.ProtoSchema;
+import com.google.cloud.bigquery.storage.v1.ProtoSchemaConverter;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.collect.ImmutableMap;
+import com.google.protobuf.DescriptorProtos;
+import com.google.protobuf.DescriptorProtos.FieldDescriptorProto.Type;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.DynamicMessage;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSqlUtils;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
+import org.apache.spark.sql.catalyst.util.ArrayData;
+import org.apache.spark.sql.catalyst.util.MapData;
+import org.apache.spark.sql.types.ArrayType;
+import org.apache.spark.sql.types.BinaryType;
+import org.apache.spark.sql.types.BooleanType;
+import org.apache.spark.sql.types.ByteType;
+import org.apache.spark.sql.types.DataType;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.DateType;
+import org.apache.spark.sql.types.Decimal;
+import org.apache.spark.sql.types.DecimalType;
+import org.apache.spark.sql.types.DoubleType;
+import org.apache.spark.sql.types.FloatType;
+import org.apache.spark.sql.types.IntegerType;
+import org.apache.spark.sql.types.LongType;
+import org.apache.spark.sql.types.MapType;
+import org.apache.spark.sql.types.Metadata;
+import org.apache.spark.sql.types.ShortType;
+import org.apache.spark.sql.types.StringType;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.types.TimestampType;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import scala.Function1;
+import scala.Tuple2;
+
+<span class="nc" id="L74">public class ProtobufUtils {</span>
+
+  public static final class ProtobufSchemaFieldCacheEntry {
+    private DataType sparkType;
+    private boolean nullable;
+    private Descriptors.Descriptor nestedTypeDescriptor;
+    private Descriptors.FieldDescriptor fieldDescriptor;
+    private Optional&lt;TypeConverter&gt; typeConverterOptional;
+    private Optional&lt;SupportedCustomDataType&gt; customDataTypeOptional;
+
+    public ProtobufSchemaFieldCacheEntry(
+        DataType sparkType,
+        boolean nullable,
+        Descriptors.Descriptor nestedTypeDescriptor,
+        Descriptors.FieldDescriptor fieldDescriptor,
+        Optional&lt;TypeConverter&gt; typeConverterOptional,
+<span class="fc" id="L90">        Optional&lt;SupportedCustomDataType&gt; customDataTypeOptional) {</span>
+<span class="fc" id="L91">      this.sparkType = sparkType;</span>
+<span class="fc" id="L92">      this.nullable = nullable;</span>
+<span class="fc" id="L93">      this.nestedTypeDescriptor = nestedTypeDescriptor;</span>
+<span class="fc" id="L94">      this.fieldDescriptor = fieldDescriptor;</span>
+<span class="fc" id="L95">      this.typeConverterOptional = typeConverterOptional;</span>
+<span class="fc" id="L96">      this.customDataTypeOptional = customDataTypeOptional;</span>
+<span class="fc" id="L97">    }</span>
+
+    public DataType getSparkType() {
+<span class="fc" id="L100">      return sparkType;</span>
+    }
+
+    public boolean getNullable() {
+<span class="fc" id="L104">      return nullable;</span>
+    }
+
+    public Descriptors.Descriptor getNestedTypeDescriptor() {
+<span class="fc" id="L108">      return nestedTypeDescriptor;</span>
+    }
+
+    public Descriptors.FieldDescriptor getFieldDescriptor() {
+<span class="fc" id="L112">      return fieldDescriptor;</span>
+    }
+
+    public Optional&lt;TypeConverter&gt; getTypeConverterOptional() {
+<span class="fc" id="L116">      return typeConverterOptional;</span>
+    }
+
+    public Optional&lt;SupportedCustomDataType&gt; getCustomDataTypeOptional() {
+<span class="fc" id="L120">      return customDataTypeOptional;</span>
+    }
+  }
+
+  private static ProtobufSchemaFieldCacheEntry computeProtobufSchemaFieldEntry(
+      StructType schema, Descriptors.Descriptor schemaDescriptor, int fieldIndex) {
+<span class="fc" id="L126">    StructField sparkField = schema.fields()[fieldIndex];</span>
+<span class="fc" id="L127">    int protoFieldNumber = fieldIndex + 1;</span>
+<span class="fc" id="L128">    return new ProtobufSchemaFieldCacheEntry(</span>
+<span class="fc" id="L129">        sparkField.dataType(),</span>
+<span class="fc" id="L130">        sparkField.nullable(),</span>
+<span class="fc" id="L131">        schemaDescriptor.findNestedTypeByName(</span>
+            ProtobufUtils.RESERVED_NESTED_TYPE_NAME + (protoFieldNumber)),
+<span class="fc" id="L133">        schemaDescriptor.findFieldByNumber(protoFieldNumber),</span>
+<span class="fc" id="L134">        SparkBigQueryUtil.getTypeConverterStream()</span>
+<span class="fc" id="L135">            .filter(tc -&gt; tc.supportsSparkType(sparkField.dataType()))</span>
+<span class="fc" id="L136">            .findFirst(),</span>
+<span class="fc" id="L137">        SupportedCustomDataType.of(sparkField.dataType()));</span>
+  }
+
+<span class="fc" id="L140">  static final Logger logger = LoggerFactory.getLogger(ProtobufUtils.class);</span>
+  // The maximum nesting depth of a BigQuery RECORD:
+  private static final int MAX_BIGQUERY_NESTED_DEPTH = 15;
+  // For every message, a nested type is name &quot;STRUCT&quot;+i, where i is the
+  // number of the corresponding field that is of this type in the containing message.
+  private static final String RESERVED_NESTED_TYPE_NAME = &quot;STRUCT&quot;;
+
+  private static final LoadingCache&lt;MapType, StructType&gt; MAP_TYPE_STRUCT_TYPE_CACHE =
+<span class="fc" id="L148">      CacheBuilder.&lt;MapType, StructType&gt;newBuilder()</span>
+<span class="fc" id="L149">          .maximumSize(10_000) // 10,000 map types should be enough for most applications</span>
+<span class="fc" id="L150">          .expireAfterWrite(24, TimeUnit.HOURS) // Type definition don't really expire</span>
+<span class="fc" id="L151">          .build(</span>
+<span class="fc" id="L152">              new CacheLoader&lt;MapType, StructType&gt;() {</span>
+                @Override
+                public StructType load(MapType key) {
+<span class="fc" id="L155">                  return ProtobufUtils.createMapStructType(key);</span>
+                }
+              });
+
+  private static final ImmutableMap&lt;LegacySQLTypeName, DescriptorProtos.FieldDescriptorProto.Type&gt;
+<span class="fc" id="L160">      BigQueryToProtoType =</span>
+          new ImmutableMap.Builder&lt;LegacySQLTypeName, DescriptorProtos.FieldDescriptorProto.Type&gt;()
+<span class="fc" id="L162">              .put(LegacySQLTypeName.BYTES, DescriptorProtos.FieldDescriptorProto.Type.TYPE_BYTES)</span>
+<span class="fc" id="L163">              .put(LegacySQLTypeName.INTEGER, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)</span>
+<span class="fc" id="L164">              .put(LegacySQLTypeName.BOOLEAN, DescriptorProtos.FieldDescriptorProto.Type.TYPE_BOOL)</span>
+<span class="fc" id="L165">              .put(LegacySQLTypeName.FLOAT, DescriptorProtos.FieldDescriptorProto.Type.TYPE_DOUBLE)</span>
+<span class="fc" id="L166">              .put(</span>
+                  LegacySQLTypeName.NUMERIC, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)
+<span class="fc" id="L168">              .put(</span>
+                  LegacySQLTypeName.BIGNUMERIC,
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)
+<span class="fc" id="L171">              .put(LegacySQLTypeName.STRING, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)</span>
+<span class="fc" id="L172">              .put(LegacySQLTypeName.JSON, DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)</span>
+<span class="fc" id="L173">              .put(</span>
+                  LegacySQLTypeName.TIMESTAMP,
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)
+<span class="fc" id="L176">              .put(LegacySQLTypeName.DATE, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32)</span>
+<span class="fc" id="L177">              .put(</span>
+                  LegacySQLTypeName.DATETIME, DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)
+<span class="fc" id="L179">              .put(</span>
+                  LegacySQLTypeName.GEOGRAPHY,
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_BYTES)
+<span class="fc" id="L182">              .build();</span>
+  private static final ImmutableMap&lt;String, DescriptorProtos.FieldDescriptorProto.Type&gt;
+<span class="fc" id="L184">      SparkToProtoType =</span>
+          new ImmutableMap.Builder&lt;String, DescriptorProtos.FieldDescriptorProto.Type&gt;()
+<span class="fc" id="L186">              .put(</span>
+<span class="fc" id="L187">                  DataTypes.BinaryType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_BYTES)
+<span class="fc" id="L189">              .put(DataTypes.ByteType.json(), DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)</span>
+<span class="fc" id="L190">              .put(</span>
+<span class="fc" id="L191">                  DataTypes.ShortType.json(), DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)</span>
+<span class="fc" id="L192">              .put(</span>
+<span class="fc" id="L193">                  DataTypes.IntegerType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)
+<span class="fc" id="L195">              .put(DataTypes.LongType.json(), DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)</span>
+<span class="fc" id="L196">              .put(</span>
+<span class="fc" id="L197">                  DataTypes.BooleanType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_BOOL)
+<span class="fc" id="L199">              .put(</span>
+<span class="fc" id="L200">                  DataTypes.FloatType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_DOUBLE)
+<span class="fc" id="L202">              .put(</span>
+<span class="fc" id="L203">                  DataTypes.DoubleType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_DOUBLE)
+<span class="fc" id="L205">              .put(</span>
+<span class="fc" id="L206">                  SchemaConverters.NUMERIC_SPARK_TYPE.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)
+<span class="fc" id="L208">              .put(</span>
+<span class="fc" id="L209">                  DataTypes.StringType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)
+<span class="fc" id="L211">              .put(</span>
+<span class="fc" id="L212">                  DataTypes.TimestampType.json(),</span>
+                  DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64)
+<span class="fc" id="L214">              .put(DataTypes.DateType.json(), DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT32)</span>
+<span class="fc" id="L215">              .build();</span>
+  private static final ImmutableMap&lt;Field.Mode, DescriptorProtos.FieldDescriptorProto.Label&gt;
+<span class="fc" id="L217">      BigQueryModeToProtoFieldLabel =</span>
+          new ImmutableMap.Builder&lt;Field.Mode, DescriptorProtos.FieldDescriptorProto.Label&gt;()
+<span class="fc" id="L219">              .put(Field.Mode.NULLABLE, DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)</span>
+<span class="fc" id="L220">              .put(Field.Mode.REPEATED, DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED)</span>
+<span class="fc" id="L221">              .put(Field.Mode.REQUIRED, DescriptorProtos.FieldDescriptorProto.Label.LABEL_REQUIRED)</span>
+<span class="fc" id="L222">              .build();</span>
+
+  /** BigQuery Schema ==&gt; ProtoSchema converter utils: */
+  public static ProtoSchema toProtoSchema(Schema schema) throws IllegalArgumentException {
+    try {
+<span class="nc" id="L227">      Descriptors.Descriptor descriptor = toDescriptor(schema);</span>
+<span class="nc" id="L228">      return ProtoSchemaConverter.convert(descriptor);</span>
+<span class="nc" id="L229">    } catch (Descriptors.DescriptorValidationException e) {</span>
+<span class="nc" id="L230">      throw new IllegalArgumentException(&quot;Could not build Proto-Schema from BigQuery schema&quot;, e);</span>
+    }
+  }
+
+  public static ProtoSchema toProtoSchema(StructType schema) throws IllegalArgumentException {
+    try {
+<span class="fc" id="L236">      Descriptors.Descriptor descriptor = toDescriptor(schema);</span>
+<span class="fc" id="L237">      return ProtoSchemaConverter.convert(descriptor);</span>
+<span class="nc" id="L238">    } catch (Descriptors.DescriptorValidationException e) {</span>
+<span class="nc" id="L239">      throw new IllegalArgumentException(&quot;Could not build Proto-Schema from Spark schema&quot;, e);</span>
+    }
+  }
+
+  private static Descriptors.Descriptor toDescriptor(Schema schema)
+      throws Descriptors.DescriptorValidationException {
+    DescriptorProtos.DescriptorProto.Builder descriptorBuilder =
+<span class="nc" id="L246">        DescriptorProtos.DescriptorProto.newBuilder().setName(&quot;Schema&quot;);</span>
+
+<span class="nc" id="L248">    FieldList fields = schema.getFields();</span>
+
+<span class="nc" id="L250">    int initialDepth = 0;</span>
+<span class="nc" id="L251">    DescriptorProtos.DescriptorProto descriptorProto =</span>
+<span class="nc" id="L252">        buildDescriptorProtoWithFields(descriptorBuilder, fields, initialDepth);</span>
+
+<span class="nc" id="L254">    return createDescriptorFromProto(descriptorProto);</span>
+  }
+
+  private static Descriptors.Descriptor createDescriptorFromProto(
+      DescriptorProtos.DescriptorProto descriptorProto)
+      throws Descriptors.DescriptorValidationException {
+    DescriptorProtos.FileDescriptorProto fileDescriptorProto =
+<span class="fc" id="L261">        DescriptorProtos.FileDescriptorProto.newBuilder().addMessageType(descriptorProto).build();</span>
+
+<span class="fc" id="L263">    Descriptors.Descriptor descriptor =</span>
+<span class="fc" id="L264">        Descriptors.FileDescriptor.buildFrom(</span>
+                fileDescriptorProto, new Descriptors.FileDescriptor[] {})
+<span class="fc" id="L266">            .getMessageTypes()</span>
+<span class="fc" id="L267">            .get(0);</span>
+
+<span class="fc" id="L269">    return descriptor;</span>
+  }
+
+  @VisibleForTesting
+  protected static DescriptorProtos.DescriptorProto buildDescriptorProtoWithFields(
+      DescriptorProtos.DescriptorProto.Builder descriptorBuilder, FieldList fields, int depth) {
+<span class="nc bnc" id="L275" title="All 2 branches missed.">    Preconditions.checkArgument(</span>
+        depth &lt; MAX_BIGQUERY_NESTED_DEPTH,
+        &quot;Tried to convert a BigQuery schema that exceeded BigQuery maximum nesting depth&quot;);
+<span class="nc" id="L278">    int messageNumber = 1;</span>
+<span class="nc bnc" id="L279" title="All 2 branches missed.">    for (Field field : fields) {</span>
+<span class="nc" id="L280">      String fieldName = field.getName();</span>
+<span class="nc" id="L281">      DescriptorProtos.FieldDescriptorProto.Label fieldLabel = toProtoFieldLabel(field.getMode());</span>
+<span class="nc" id="L282">      FieldList subFields = field.getSubFields();</span>
+
+<span class="nc bnc" id="L284" title="All 2 branches missed.">      if (field.getType() == LegacySQLTypeName.RECORD) {</span>
+<span class="nc" id="L285">        String recordTypeName =</span>
+            RESERVED_NESTED_TYPE_NAME
+                + messageNumber; // TODO: Maintain this as a reserved nested-type name, which no
+        // column can have.
+<span class="nc" id="L289">        DescriptorProtos.DescriptorProto.Builder nestedFieldTypeBuilder =</span>
+<span class="nc" id="L290">            descriptorBuilder.addNestedTypeBuilder();</span>
+<span class="nc" id="L291">        nestedFieldTypeBuilder.setName(recordTypeName);</span>
+<span class="nc" id="L292">        DescriptorProtos.DescriptorProto nestedFieldType =</span>
+<span class="nc" id="L293">            buildDescriptorProtoWithFields(nestedFieldTypeBuilder, subFields, depth + 1);</span>
+
+<span class="nc" id="L295">        descriptorBuilder.addField(</span>
+<span class="nc" id="L296">            createProtoFieldBuilder(fieldName, fieldLabel, messageNumber)</span>
+<span class="nc" id="L297">                .setTypeName(recordTypeName));</span>
+<span class="nc" id="L298">      } else {</span>
+<span class="nc" id="L299">        DescriptorProtos.FieldDescriptorProto.Type fieldType = toProtoFieldType(field.getType());</span>
+<span class="nc" id="L300">        descriptorBuilder.addField(</span>
+<span class="nc" id="L301">            createProtoFieldBuilder(fieldName, fieldLabel, messageNumber, fieldType));</span>
+      }
+<span class="nc" id="L303">      messageNumber++;</span>
+<span class="nc" id="L304">    }</span>
+<span class="nc" id="L305">    return descriptorBuilder.build();</span>
+  }
+
+  private static DescriptorProtos.FieldDescriptorProto.Builder createProtoFieldBuilder(
+      String fieldName, DescriptorProtos.FieldDescriptorProto.Label fieldLabel, int messageNumber) {
+<span class="fc" id="L310">    return DescriptorProtos.FieldDescriptorProto.newBuilder()</span>
+<span class="fc" id="L311">        .setName(fieldName)</span>
+<span class="fc" id="L312">        .setLabel(fieldLabel)</span>
+<span class="fc" id="L313">        .setNumber(messageNumber);</span>
+  }
+
+  @VisibleForTesting
+  protected static DescriptorProtos.FieldDescriptorProto.Builder createProtoFieldBuilder(
+      String fieldName,
+      DescriptorProtos.FieldDescriptorProto.Label fieldLabel,
+      int messageNumber,
+      DescriptorProtos.FieldDescriptorProto.Type fieldType) {
+<span class="fc" id="L322">    return createProtoFieldBuilder(fieldName, fieldLabel, messageNumber).setType(fieldType);</span>
+  }
+
+  private static DescriptorProtos.FieldDescriptorProto.Label toProtoFieldLabel(Field.Mode mode) {
+<span class="nc" id="L326">    return Preconditions.checkNotNull(</span>
+<span class="nc" id="L327">        BigQueryModeToProtoFieldLabel.get(mode),</span>
+<span class="nc" id="L328">        new IllegalArgumentException(&quot;A BigQuery Field Mode was invalid: &quot; + mode.name()));</span>
+  }
+
+  // NOTE: annotations for DATETIME and TIMESTAMP objects are currently unsupported for external
+  // users,
+  // but if they become available, it would be advisable to append an annotation to the
+  // protoFieldBuilder
+  // for these and other types.
+  private static DescriptorProtos.FieldDescriptorProto.Type toProtoFieldType(
+      LegacySQLTypeName bqType) {
+<span class="nc bnc" id="L338" title="All 2 branches missed.">    if (LegacySQLTypeName.RECORD.equals(bqType)) {</span>
+<span class="nc" id="L339">      throw new IllegalStateException(</span>
+          &quot;Program attempted to return an atomic data-type for a RECORD&quot;);
+    }
+<span class="nc" id="L342">    return Preconditions.checkNotNull(</span>
+<span class="nc" id="L343">        BigQueryToProtoType.get(bqType),</span>
+<span class="nc" id="L344">        new IllegalArgumentException(&quot;Unexpected type: &quot; + bqType.name()));</span>
+  }
+
+  /**
+   * Spark Row --&gt; ProtoRows converter utils: To be used by the DataWriters facing the BigQuery
+   * Storage Write API
+   */
+  public static ProtoRows toProtoRows(StructType sparkSchema, InternalRow[] rows) {
+    try {
+<span class="nc" id="L353">      Descriptors.Descriptor schemaDescriptor = toDescriptor(sparkSchema);</span>
+<span class="nc" id="L354">      ProtoRows.Builder protoRows = ProtoRows.newBuilder();</span>
+<span class="nc" id="L355">      Map&lt;Integer, ProtobufSchemaFieldCacheEntry&gt; fieldIndexToEntryMap = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L356">      DynamicMessage.Builder messageBuilder = DynamicMessage.newBuilder(schemaDescriptor);</span>
+
+<span class="nc bnc" id="L358" title="All 2 branches missed.">      for (InternalRow row : rows) {</span>
+<span class="nc" id="L359">        DynamicMessage rowMessage =</span>
+<span class="nc" id="L360">            buildSingleRowMessage(</span>
+                sparkSchema,
+                schemaDescriptor,
+                row,
+<span class="nc" id="L364">                Optional.of(fieldIndexToEntryMap),</span>
+                messageBuilder);
+<span class="nc" id="L366">        protoRows.addSerializedRows(rowMessage.toByteString());</span>
+      }
+<span class="nc" id="L368">      return protoRows.build();</span>
+<span class="nc" id="L369">    } catch (Exception e) {</span>
+<span class="nc" id="L370">      throw new RuntimeException(&quot;Could not convert Internal Rows to Proto Rows.&quot;, e);</span>
+    }
+  }
+
+  public static DynamicMessage buildSingleRowMessage(
+      StructType schema,
+      Descriptors.Descriptor schemaDescriptor,
+      InternalRow row,
+      Optional&lt;Map&lt;Integer, ProtobufSchemaFieldCacheEntry&gt;&gt; fieldIndexToEntryMap,
+      DynamicMessage.Builder messageBuilder) {
+<span class="fc" id="L380">    messageBuilder.clear();</span>
+
+<span class="fc bfc" id="L382" title="All 2 branches covered.">    for (int fieldIndex = 0; fieldIndex &lt; schemaDescriptor.getFields().size(); fieldIndex++) {</span>
+<span class="fc" id="L383">      int fieldIndexCopy = fieldIndex;</span>
+<span class="fc" id="L384">      ProtobufSchemaFieldCacheEntry protobufSchemaFieldEntry =</span>
+<span class="fc bfc" id="L385" title="All 2 branches covered.">          fieldIndexToEntryMap.isPresent()</span>
+              ? fieldIndexToEntryMap
+<span class="fc" id="L387">                  .get()</span>
+<span class="fc" id="L388">                  .computeIfAbsent(</span>
+<span class="fc" id="L389">                      fieldIndexCopy,</span>
+                      k -&gt; {
+<span class="fc" id="L391">                        return computeProtobufSchemaFieldEntry(</span>
+                            schema, schemaDescriptor, fieldIndexCopy);
+                      })
+<span class="fc" id="L394">              : computeProtobufSchemaFieldEntry(schema, schemaDescriptor, fieldIndexCopy);</span>
+<span class="fc" id="L395">      Object sparkValue = row.get(fieldIndex, protobufSchemaFieldEntry.getSparkType());</span>
+<span class="fc" id="L396">      Object protoValue =</span>
+<span class="fc" id="L397">          convertSparkValueToProtoRowValue(</span>
+<span class="fc" id="L398">              protobufSchemaFieldEntry.getSparkType(),</span>
+              sparkValue,
+<span class="fc" id="L400">              protobufSchemaFieldEntry.getNullable(),</span>
+<span class="fc" id="L401">              protobufSchemaFieldEntry.getNestedTypeDescriptor(),</span>
+<span class="fc" id="L402">              protobufSchemaFieldEntry.getTypeConverterOptional(),</span>
+<span class="fc" id="L403">              protobufSchemaFieldEntry.getCustomDataTypeOptional());</span>
+
+<span class="fc bfc" id="L405" title="All 2 branches covered.">      if (protoValue == null) {</span>
+<span class="fc" id="L406">        continue;</span>
+      }
+
+<span class="fc" id="L409">      messageBuilder.setField(protobufSchemaFieldEntry.getFieldDescriptor(), protoValue);</span>
+    }
+
+<span class="fc" id="L412">    return messageBuilder.build();</span>
+  }
+
+  public static Descriptors.Descriptor toDescriptor(StructType schema)
+      throws Descriptors.DescriptorValidationException {
+    DescriptorProtos.DescriptorProto.Builder descriptorBuilder =
+<span class="fc" id="L418">        DescriptorProtos.DescriptorProto.newBuilder().setName(&quot;Schema&quot;);</span>
+
+<span class="fc" id="L420">    int initialDepth = 0;</span>
+<span class="fc" id="L421">    DescriptorProtos.DescriptorProto descriptorProto =</span>
+<span class="fc" id="L422">        buildDescriptorProtoWithFields(descriptorBuilder, schema.fields(), initialDepth);</span>
+
+<span class="fc" id="L424">    return createDescriptorFromProto(descriptorProto);</span>
+  }
+
+  /*
+  Takes a value in Spark format and converts it into ProtoRows format (to eventually be given to BigQuery).
+   */
+  private static Object convertSparkValueToProtoRowValue(
+      DataType sparkType,
+      Object sparkValue,
+      boolean nullable,
+      Descriptors.Descriptor nestedTypeDescriptor,
+      Optional&lt;TypeConverter&gt; typeConverterOptional,
+      Optional&lt;SupportedCustomDataType&gt; customDataTypeOptional) {
+<span class="fc bfc" id="L437" title="All 2 branches covered.">    if (sparkValue == null) {</span>
+<span class="pc bpc" id="L438" title="1 of 2 branches missed.">      if (!nullable) {</span>
+<span class="nc" id="L439">        throw new IllegalArgumentException(&quot;Non-nullable field was null.&quot;);</span>
+      } else {
+<span class="fc" id="L441">        return null;</span>
+      }
+    }
+
+<span class="fc bfc" id="L445" title="All 2 branches covered.">    if (typeConverterOptional.isPresent()) {</span>
+<span class="fc" id="L446">      return typeConverterOptional.get().sparkToProtoValue(sparkValue);</span>
+    }
+
+    // UDT support
+<span class="fc bfc" id="L450" title="All 2 branches covered.">    if (customDataTypeOptional.isPresent()) {</span>
+<span class="fc" id="L451">      sparkType = customDataTypeOptional.map(SupportedCustomDataType::getSqlType).orElse(sparkType);</span>
+      InternalRow internalRow;
+<span class="pc bpc" id="L453" title="1 of 2 branches missed.">      if (sparkValue instanceof InternalRow) {</span>
+        // Spark 2.4
+<span class="nc" id="L455">        internalRow = (InternalRow) sparkValue;</span>
+      } else {
+        // spark 3.x
+<span class="fc" id="L458">        internalRow = customDataTypeOptional.get().serialize(sparkValue);</span>
+      }
+<span class="fc" id="L460">      return buildSingleRowMessage(</span>
+          (StructType) sparkType,
+          nestedTypeDescriptor,
+          internalRow,
+<span class="fc" id="L464">          /*fieldIndexToEntryMap*/ Optional.empty(),</span>
+<span class="fc" id="L465">          DynamicMessage.newBuilder(nestedTypeDescriptor));</span>
+    }
+
+<span class="fc bfc" id="L468" title="All 2 branches covered.">    if (sparkType instanceof ArrayType) {</span>
+<span class="fc" id="L469">      ArrayType arrayType = (ArrayType) sparkType;</span>
+<span class="fc" id="L470">      DataType elementType = arrayType.elementType();</span>
+<span class="fc" id="L471">      boolean containsNull = arrayType.containsNull();</span>
+      Optional&lt;TypeConverter&gt; typeConverterElementOptional =
+<span class="fc" id="L473">          SparkBigQueryUtil.getTypeConverterStream()</span>
+<span class="fc" id="L474">              .filter(tc -&gt; tc.supportsSparkType(elementType))</span>
+<span class="fc" id="L475">              .findFirst();</span>
+<span class="fc" id="L476">      Optional&lt;SupportedCustomDataType&gt; customDataTypeElementOptional =</span>
+<span class="fc" id="L477">          SupportedCustomDataType.of(elementType);</span>
+<span class="fc" id="L478">      List&lt;Object&gt; protoValue = new ArrayList&lt;&gt;();</span>
+      // having issues to convert WrappedArray to Object[] in Java
+<span class="fc bfc" id="L480" title="All 2 branches covered.">      if (sparkValue instanceof ArrayData) {</span>
+<span class="fc" id="L481">        Object[] sparkArrayData = ((ArrayData) sparkValue).toObjectArray(elementType);</span>
+<span class="fc bfc" id="L482" title="All 2 branches covered.">        for (Object sparkElement : sparkArrayData) {</span>
+<span class="fc" id="L483">          Object converted =</span>
+<span class="fc" id="L484">              convertSparkValueToProtoRowValue(</span>
+                  elementType,
+                  sparkElement,
+                  containsNull,
+                  nestedTypeDescriptor,
+                  typeConverterElementOptional,
+                  customDataTypeElementOptional);
+<span class="pc bpc" id="L491" title="1 of 2 branches missed.">          if (converted == null) {</span>
+<span class="nc" id="L492">            continue;</span>
+          }
+<span class="fc" id="L494">          protoValue.add(converted);</span>
+        }
+<span class="fc" id="L496">      } else {</span>
+<span class="fc" id="L497">        scala.collection.Iterator&lt;Object&gt; iterator =</span>
+<span class="fc" id="L498">            ((scala.collection.Iterable&lt;Object&gt;) sparkValue).iterator();</span>
+<span class="fc bfc" id="L499" title="All 2 branches covered.">        while (iterator.hasNext()) {</span>
+<span class="fc" id="L500">          Object sparkElement = iterator.next();</span>
+<span class="fc" id="L501">          Object converted =</span>
+<span class="fc" id="L502">              convertSparkValueToProtoRowValue(</span>
+                  elementType,
+                  sparkElement,
+                  containsNull,
+                  nestedTypeDescriptor,
+                  typeConverterElementOptional,
+                  customDataTypeElementOptional);
+<span class="pc bpc" id="L509" title="1 of 2 branches missed.">          if (converted == null) {</span>
+<span class="nc" id="L510">            continue;</span>
+          }
+<span class="fc" id="L512">          protoValue.add(converted);</span>
+<span class="fc" id="L513">        }</span>
+      }
+<span class="fc" id="L515">      return protoValue;</span>
+    }
+
+<span class="fc bfc" id="L518" title="All 2 branches covered.">    if (sparkType instanceof StructType) {</span>
+<span class="fc" id="L519">      InternalRow internalRow = null;</span>
+<span class="fc bfc" id="L520" title="All 2 branches covered.">      if (sparkValue instanceof Row) {</span>
+<span class="fc" id="L521">        internalRow = SparkSqlUtils.getInstance().rowToInternalRow((Row) sparkValue);</span>
+      } else {
+<span class="fc" id="L523">        internalRow = (InternalRow) sparkValue;</span>
+      }
+<span class="fc" id="L525">      return buildSingleRowMessage(</span>
+          (StructType) sparkType,
+          nestedTypeDescriptor,
+          internalRow,
+<span class="fc" id="L529">          /*fieldIndexToEntryMap*/ Optional.empty(),</span>
+<span class="fc" id="L530">          DynamicMessage.newBuilder(nestedTypeDescriptor));</span>
+    }
+
+<span class="pc bpc" id="L533" title="1 of 8 branches missed.">    if (sparkType instanceof ByteType</span>
+        || sparkType instanceof ShortType
+        || sparkType instanceof IntegerType
+        || sparkType instanceof LongType) {
+<span class="fc" id="L537">      return ((Number) sparkValue).longValue();</span>
+    }
+<span class="fc bfc" id="L539" title="All 2 branches covered.">    if (sparkType instanceof TimestampType) {</span>
+<span class="fc" id="L540">      return SparkBigQueryUtil.sparkTimestampToBigQuery(sparkValue);</span>
+    } // TODO: CalendarInterval
+
+<span class="fc bfc" id="L543" title="All 2 branches covered.">    if (sparkType instanceof DateType) {</span>
+<span class="fc" id="L544">      return SparkBigQueryUtil.sparkDateToBigQuery(sparkValue);</span>
+    }
+
+<span class="pc bpc" id="L547" title="1 of 4 branches missed.">    if (sparkType instanceof FloatType || sparkType instanceof DoubleType) {</span>
+<span class="fc" id="L548">      return ((Number) sparkValue).doubleValue();</span>
+    }
+
+<span class="fc bfc" id="L551" title="All 2 branches covered.">    if (sparkType instanceof DecimalType) {</span>
+<span class="fc" id="L552">      return convertDecimalToString(sparkValue);</span>
+    }
+
+<span class="pc bpc" id="L555" title="1 of 2 branches missed.">    if (sparkType instanceof BooleanType) {</span>
+<span class="nc" id="L556">      return sparkValue;</span>
+    }
+
+<span class="pc bpc" id="L559" title="1 of 2 branches missed.">    if (sparkType instanceof BinaryType) {</span>
+<span class="nc" id="L560">      return sparkValue;</span>
+    }
+
+<span class="fc bfc" id="L563" title="All 2 branches covered.">    if (sparkType instanceof StringType) {</span>
+<span class="fc" id="L564">      return sparkValue.toString();</span>
+    }
+
+<span class="pc bpc" id="L567" title="1 of 2 branches missed.">    if (sparkType instanceof MapType) {</span>
+      // converting the map into ARRAY&lt;STRUCT&lt;key, value&gt;&gt; and making a recursive call
+<span class="fc" id="L569">      MapType mapType = (MapType) sparkType;</span>
+      // As the same map&lt;key, value&gt; will be converted to the same STRUCT&lt;key, value&gt;, it is best to
+      // cache this conversion instead of re-creating it for every value
+<span class="fc" id="L572">      StructType mapStructType = MAP_TYPE_STRUCT_TYPE_CACHE.getUnchecked(mapType);</span>
+<span class="fc" id="L573">      List&lt;InternalRow&gt; entries = new ArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L574" title="1 of 2 branches missed.">      if (sparkValue instanceof scala.collection.Map) {</span>
+        // Spark 3.x
+<span class="fc" id="L576">        scala.collection.Map map = (scala.collection.Map) sparkValue;</span>
+<span class="fc" id="L577">        map.foreach(</span>
+<span class="fc" id="L578">            new Function1&lt;Tuple2, Object&gt;() {</span>
+              @Override
+              public Object apply(Tuple2 entry) {
+<span class="fc" id="L581">                return entries.add(new GenericInternalRow(new Object[] {entry._1(), entry._2()}));</span>
+              }
+
+              @Override
+              public &lt;A&gt; Function1&lt;A, Object&gt; compose(Function1&lt;A, Tuple2&gt; g) {
+<span class="nc" id="L586">                return Function1.super.compose(g);</span>
+              }
+
+              @Override
+              public &lt;A&gt; Function1&lt;Tuple2, A&gt; andThen(Function1&lt;Object, A&gt; g) {
+<span class="nc" id="L591">                return Function1.super.andThen(g);</span>
+              }
+            });
+<span class="fc" id="L594">      } else {</span>
+        // Spark 2.4
+<span class="nc" id="L596">        MapData map = (MapData) sparkValue;</span>
+<span class="nc" id="L597">        Object[] keys = map.keyArray().toObjectArray(mapType.keyType());</span>
+<span class="nc" id="L598">        Object[] values = map.valueArray().toObjectArray(mapType.valueType());</span>
+        Optional&lt;TypeConverter&gt; typeConverterMapKeyOptional =
+<span class="nc" id="L600">            SparkBigQueryUtil.getTypeConverterStream()</span>
+<span class="nc" id="L601">                .filter(tc -&gt; tc.supportsSparkType(mapType.keyType()))</span>
+<span class="nc" id="L602">                .findFirst();</span>
+<span class="nc" id="L603">        Optional&lt;SupportedCustomDataType&gt; customDataTypeMapKeyOptional =</span>
+<span class="nc" id="L604">            SupportedCustomDataType.of(mapType.keyType());</span>
+        Optional&lt;TypeConverter&gt; typeConverterMapValueOptional =
+<span class="nc" id="L606">            SparkBigQueryUtil.getTypeConverterStream()</span>
+<span class="nc" id="L607">                .filter(tc -&gt; tc.supportsSparkType(mapType.valueType()))</span>
+<span class="nc" id="L608">                .findFirst();</span>
+<span class="nc" id="L609">        Optional&lt;SupportedCustomDataType&gt; customDataTypeMapValueOptional =</span>
+<span class="nc" id="L610">            SupportedCustomDataType.of(mapType.valueType());</span>
+<span class="nc bnc" id="L611" title="All 2 branches missed.">        for (int i = 0; i &lt; map.numElements(); i++) {</span>
+<span class="nc" id="L612">          Object key =</span>
+<span class="nc" id="L613">              convertSparkValueToProtoRowValue(</span>
+<span class="nc" id="L614">                  mapType.keyType(),</span>
+                  keys[i], /* nullable */
+                  false,
+                  nestedTypeDescriptor,
+                  typeConverterMapKeyOptional,
+                  customDataTypeMapKeyOptional);
+<span class="nc" id="L620">          Object value =</span>
+<span class="nc" id="L621">              convertSparkValueToProtoRowValue(</span>
+<span class="nc" id="L622">                  mapType.valueType(),</span>
+                  values[i],
+<span class="nc" id="L624">                  mapType.valueContainsNull(),</span>
+                  nestedTypeDescriptor,
+                  typeConverterMapValueOptional,
+                  customDataTypeMapValueOptional);
+<span class="nc" id="L628">          entries.add(new GenericInternalRow(new Object[] {key, value}));</span>
+        }
+      }
+<span class="fc" id="L631">      ArrayData resultArray = ArrayData.toArrayData(entries.stream().toArray());</span>
+<span class="fc" id="L632">      ArrayType resultArrayType = ArrayType.apply(mapStructType, /* containsNull */ false);</span>
+      Optional&lt;TypeConverter&gt; typeConverterArrayOptional =
+<span class="fc" id="L634">          SparkBigQueryUtil.getTypeConverterStream()</span>
+<span class="fc" id="L635">              .filter(tc -&gt; tc.supportsSparkType(resultArrayType))</span>
+<span class="fc" id="L636">              .findFirst();</span>
+<span class="fc" id="L637">      Optional&lt;SupportedCustomDataType&gt; customDataTypeArrayOptional =</span>
+<span class="fc" id="L638">          SupportedCustomDataType.of(resultArrayType);</span>
+<span class="fc" id="L639">      return convertSparkValueToProtoRowValue(</span>
+          resultArrayType,
+          resultArray,
+          nullable,
+          nestedTypeDescriptor,
+          typeConverterArrayOptional,
+          customDataTypeArrayOptional);
+    }
+
+<span class="nc" id="L648">    throw new IllegalStateException(&quot;Unexpected type: &quot; + sparkType);</span>
+  }
+
+  private static DescriptorProtos.DescriptorProto buildDescriptorProtoWithFields(
+      DescriptorProtos.DescriptorProto.Builder descriptorBuilder, StructField[] fields, int depth) {
+<span class="pc bpc" id="L653" title="1 of 2 branches missed.">    Preconditions.checkArgument(</span>
+        depth &lt; MAX_BIGQUERY_NESTED_DEPTH, &quot;Spark Schema exceeds BigQuery maximum nesting depth.&quot;);
+<span class="fc" id="L655">    int messageNumber = 1;</span>
+<span class="fc bfc" id="L656" title="All 2 branches covered.">    for (StructField field : fields) {</span>
+<span class="fc" id="L657">      String fieldName = field.name();</span>
+<span class="fc" id="L658">      DescriptorProtos.FieldDescriptorProto.Label fieldLabel =</span>
+<span class="fc bfc" id="L659" title="All 2 branches covered.">          field.nullable()</span>
+              ? DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL
+              : DescriptorProtos.FieldDescriptorProto.Label.LABEL_REQUIRED;
+
+<span class="fc" id="L663">      DataType sparkType = field.dataType();</span>
+      // UDT support
+<span class="fc" id="L665">      sparkType =</span>
+<span class="fc" id="L666">          SupportedCustomDataType.of(sparkType)</span>
+<span class="fc" id="L667">              .map(SupportedCustomDataType::getSqlType)</span>
+<span class="fc" id="L668">              .orElse(sparkType);</span>
+
+<span class="fc bfc" id="L670" title="All 2 branches covered.">      if (sparkType instanceof ArrayType) {</span>
+<span class="fc" id="L671">        ArrayType arrayType = (ArrayType) sparkType;</span>
+        /* DescriptorProtos.FieldDescriptorProto.Label elementLabel = arrayType.containsNull() ?
+        DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL :
+        DescriptorProtos.FieldDescriptorProto.Label.LABEL_REQUIRED; TODO: how to support null instances inside an array (repeated field) in BigQuery?*/
+<span class="fc" id="L675">        sparkType = arrayType.elementType();</span>
+<span class="fc" id="L676">        fieldLabel = DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED;</span>
+      }
+
+      DescriptorProtos.FieldDescriptorProto.Builder protoFieldBuilder;
+<span class="fc bfc" id="L680" title="All 4 branches covered.">      if (sparkType instanceof StructType || sparkType instanceof MapType) {</span>
+<span class="fc" id="L681">        String nestedName =</span>
+            RESERVED_NESTED_TYPE_NAME
+                + messageNumber; // TODO: Maintain this as a reserved nested-type name, which no
+        // column can have.
+<span class="fc" id="L685">        StructField[] subFields = null;</span>
+<span class="fc bfc" id="L686" title="All 2 branches covered.">        if (sparkType instanceof StructType) {</span>
+<span class="fc" id="L687">          StructType structType = (StructType) sparkType;</span>
+<span class="fc" id="L688">          subFields = structType.fields();</span>
+<span class="fc" id="L689">        } else {</span>
+          // Map type
+<span class="fc" id="L691">          MapType mapType = (MapType) sparkType;</span>
+<span class="fc" id="L692">          fieldLabel = DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED;</span>
+<span class="fc" id="L693">          subFields = createMapStructFields(mapType);</span>
+        }
+
+<span class="fc" id="L696">        DescriptorProtos.DescriptorProto.Builder nestedFieldTypeBuilder =</span>
+<span class="fc" id="L697">            descriptorBuilder.addNestedTypeBuilder().setName(nestedName);</span>
+<span class="fc" id="L698">        buildDescriptorProtoWithFields(nestedFieldTypeBuilder, subFields, depth + 1);</span>
+
+<span class="fc" id="L700">        protoFieldBuilder =</span>
+<span class="fc" id="L701">            createProtoFieldBuilder(fieldName, fieldLabel, messageNumber).setTypeName(nestedName);</span>
+<span class="fc" id="L702">      } else {</span>
+<span class="fc" id="L703">        DescriptorProtos.FieldDescriptorProto.Type fieldType = toProtoFieldType(sparkType);</span>
+<span class="fc" id="L704">        protoFieldBuilder =</span>
+<span class="fc" id="L705">            createProtoFieldBuilder(fieldName, fieldLabel, messageNumber, fieldType);</span>
+      }
+<span class="fc" id="L707">      descriptorBuilder.addField(protoFieldBuilder);</span>
+<span class="fc" id="L708">      messageNumber++;</span>
+    }
+<span class="fc" id="L710">    return descriptorBuilder.build();</span>
+  }
+
+  static StructType createMapStructType(MapType mapType) {
+<span class="fc" id="L714">    return new StructType(createMapStructFields(mapType));</span>
+  }
+
+  @NotNull
+  static StructField[] createMapStructFields(MapType mapType) {
+<span class="fc" id="L719">    return new StructField[] {</span>
+<span class="fc" id="L720">      StructField.apply( //</span>
+          &quot;key&quot;, //
+<span class="fc" id="L722">          mapType.keyType(), //</span>
+          /* nullable */ false, //
+<span class="fc" id="L724">          Metadata.empty()),</span>
+<span class="fc" id="L725">      StructField.apply( //</span>
+          &quot;value&quot;, //
+<span class="fc" id="L727">          mapType.valueType(), //</span>
+<span class="fc" id="L728">          mapType.valueContainsNull(), //</span>
+<span class="fc" id="L729">          Metadata.empty())</span>
+    };
+  }
+
+  private static DescriptorProtos.FieldDescriptorProto.Type toProtoFieldType(DataType sparkType) {
+    Optional&lt;DescriptorProtos.FieldDescriptorProto.Type&gt; protoFieldType =
+<span class="fc" id="L735">        SparkBigQueryUtil.getTypeConverterStream()</span>
+<span class="fc" id="L736">            .filter(tc -&gt; tc.supportsSparkType(sparkType))</span>
+<span class="fc" id="L737">            .map(tc -&gt; tc.toProtoFieldType(sparkType))</span>
+<span class="fc" id="L738">            .findFirst();</span>
+<span class="fc bfc" id="L739" title="All 2 branches covered.">    if (protoFieldType.isPresent()) {</span>
+<span class="fc" id="L740">      return protoFieldType.get();</span>
+    }
+
+<span class="pc bpc" id="L743" title="1 of 2 branches missed.">    if (sparkType instanceof MapType) {;</span>
+    }
+<span class="fc bfc" id="L745" title="All 2 branches covered.">    if (sparkType instanceof DecimalType) {</span>
+<span class="fc" id="L746">      return Type.TYPE_STRING;</span>
+    }
+<span class="fc" id="L748">    return Preconditions.checkNotNull(</span>
+<span class="fc" id="L749">        SparkToProtoType.get(sparkType.json()),</span>
+        new IllegalStateException(&quot;Unexpected type: &quot; + sparkType));
+  }
+
+  private static String convertDecimalToString(Object decimal) {
+<span class="pc bpc" id="L754" title="1 of 2 branches missed.">    BigDecimal bigDecimal =</span>
+<span class="pc" id="L755">        decimal instanceof Decimal ? ((Decimal) decimal).toJavaBigDecimal() : (BigDecimal) decimal;</span>
+<span class="fc" id="L756">    return bigDecimal.toPlainString();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

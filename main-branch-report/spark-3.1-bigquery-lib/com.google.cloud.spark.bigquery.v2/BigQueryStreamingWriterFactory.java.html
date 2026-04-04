@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryStreamingWriterFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-3.1-bigquery-lib</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.v2</a> &gt; <span class="el_source">BigQueryStreamingWriterFactory.java</span></div><h1>BigQueryStreamingWriterFactory.java</h1><pre class="source lang-java linenums">package com.google.cloud.spark.bigquery.v2;
+
+import com.google.cloud.spark.bigquery.write.context.DataWriterContextFactory;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.connector.write.DataWriter;
+import org.apache.spark.sql.connector.write.streaming.StreamingDataWriterFactory;
+
+public class BigQueryStreamingWriterFactory implements StreamingDataWriterFactory {
+
+  private final DataWriterContextFactory&lt;InternalRow&gt; writerContextFactory;
+
+  public BigQueryStreamingWriterFactory(
+<span class="fc" id="L13">      DataWriterContextFactory&lt;InternalRow&gt; writerContextFactory) {</span>
+<span class="fc" id="L14">    this.writerContextFactory = writerContextFactory;</span>
+<span class="fc" id="L15">  }</span>
+
+  @Override
+  public DataWriter&lt;InternalRow&gt; createWriter(int partitionId, long taskId, long epochId) {
+<span class="fc" id="L19">    return new BigQueryStreamingDataWriter(</span>
+<span class="fc" id="L20">        writerContextFactory.createDataWriterContext(partitionId, taskId, epochId));</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

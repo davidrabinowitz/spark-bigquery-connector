@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>LoggingBigQueryStorageReadRowsTracer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">LoggingBigQueryStorageReadRowsTracer.java</span></div><h1>LoggingBigQueryStorageReadRowsTracer.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Implementation of {@link BigQueryStorageReadRowsTracer} that accumulates and logs times
+ * periodically.
+ */
+public class LoggingBigQueryStorageReadRowsTracer implements BigQueryStorageReadRowsTracer {
+<span class="fc" id="L31">  private static final Logger log =</span>
+<span class="fc" id="L32">      LoggerFactory.getLogger(LoggingBigQueryStorageReadRowsTracer.class);</span>
+
+  private final String streamName;
+  private final int logIntervalPowerOf2;
+  // Visible for testing.
+  Instant startTime;
+<span class="fc" id="L38">  final DurationTimer parseTime = new DurationTimer();</span>
+<span class="fc" id="L39">  final DurationTimer sparkTime = new DurationTimer();</span>
+<span class="fc" id="L40">  final DurationTimer serviceTime = new DurationTimer();</span>
+  Instant endTime;
+<span class="fc" id="L42">  long rows = 0;</span>
+<span class="fc" id="L43">  long bytes = 0;</span>
+  // For confirming data is logged.
+<span class="fc" id="L45">  long linesLogged = 0;</span>
+  BigQueryMetrics bigQueryMetrics;
+
+  Optional&lt;ReadSessionMetrics&gt; readSessionMetrics;
+
+  LoggingBigQueryStorageReadRowsTracer(
+      String streamName,
+      int logIntervalPowerOf2,
+      BigQueryMetrics bigQueryMetrics,
+<span class="fc" id="L54">      Optional&lt;ReadSessionMetrics&gt; readSessionMetrics) {</span>
+<span class="fc" id="L55">    this.streamName = streamName;</span>
+<span class="fc" id="L56">    this.logIntervalPowerOf2 = logIntervalPowerOf2;</span>
+<span class="fc" id="L57">    this.bigQueryMetrics = bigQueryMetrics;</span>
+<span class="fc" id="L58">    this.readSessionMetrics = readSessionMetrics;</span>
+<span class="fc" id="L59">  }</span>
+
+  @Override
+  public void startStream() {
+<span class="fc" id="L63">    startTime = Instant.now();</span>
+<span class="fc" id="L64">  }</span>
+
+  @Override
+  public void rowsParseStarted() {
+<span class="fc" id="L68">    parseTime.start();</span>
+<span class="fc" id="L69">  }</span>
+
+  @Override
+  public void rowsParseFinished(long rows) {
+<span class="fc" id="L73">    this.rows += rows;</span>
+<span class="fc" id="L74">    parseTime.finish();</span>
+<span class="fc" id="L75">  }</span>
+
+  @Override
+  public void readRowsResponseRequested() {
+<span class="fc" id="L79">    serviceTime.start();</span>
+<span class="fc" id="L80">  }</span>
+
+  @Override
+  public void readRowsResponseObtained(long bytes) {
+<span class="fc" id="L84">    this.bytes += bytes;</span>
+<span class="fc" id="L85">    serviceTime.finish();</span>
+<span class="fc" id="L86">  }</span>
+
+  @Override
+  public void finished() {
+<span class="fc" id="L90">    endTime = Instant.now();</span>
+<span class="fc" id="L91">    logData();</span>
+<span class="fc" id="L92">  }</span>
+
+  private static Duration average(DurationTimer durationTimer) {
+<span class="fc" id="L95">    long samples = durationTimer.getSamples();</span>
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">    if (samples == 0) {</span>
+<span class="nc" id="L97">      return null;</span>
+    }
+<span class="fc" id="L99">    return durationTimer.getAccumulatedTime().dividedBy(samples);</span>
+  }
+
+  private static String format(DurationTimer durationTimer) {
+<span class="fc" id="L103">    long samples = durationTimer.getSamples();</span>
+<span class="fc bfc" id="L104" title="All 2 branches covered.">    if (samples == 0) {</span>
+<span class="fc" id="L105">      return &quot;Not enough samples.&quot;;</span>
+    }
+<span class="fc" id="L107">    Duration average = average(durationTimer);</span>
+<span class="fc" id="L108">    return String.format(&quot;Average: %s Samples: %d&quot;, average.toString(), samples);</span>
+  }
+
+  private static String difference(DurationTimer d1, DurationTimer d2) {
+<span class="pc bpc" id="L112" title="1 of 4 branches missed.">    if (d1.getSamples() == 0 || d2.getSamples() == 0) {</span>
+<span class="fc" id="L113">      return &quot;Not enough samples.&quot;;</span>
+    }
+<span class="fc" id="L115">    return String.format(&quot;Average: %s&quot;, average(d1).minus(average(d2)).toString());</span>
+  }
+
+  private static long perSecond(DurationTimer timer, long metric) {
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    if (timer.getSamples() == 0) {</span>
+<span class="fc" id="L120">      return 0;</span>
+    }
+<span class="fc" id="L122">    Duration time = timer.getAccumulatedTime();</span>
+<span class="fc" id="L123">    double seconds = (time.toMillis() / 1000.0);</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">    if (seconds != 0) {</span>
+<span class="fc" id="L125">      return (long) (metric / seconds);</span>
+    }
+<span class="fc" id="L127">    return 0;</span>
+  }
+
+  private void logData() {
+<span class="fc" id="L131">    JsonObject jsonObject = new JsonObject();</span>
+<span class="fc" id="L132">    jsonObject.addProperty(&quot;Stream Name&quot;, streamName);</span>
+<span class="pc bpc" id="L133" title="1 of 2 branches missed.">    jsonObject.addProperty(&quot;Started&quot;, startTime == null ? &quot;&quot; : startTime.toString());</span>
+<span class="pc bpc" id="L134" title="1 of 2 branches missed.">    jsonObject.addProperty(&quot;Ended&quot;, endTime == null ? &quot;&quot; : endTime.toString());</span>
+<span class="fc" id="L135">    jsonObject.addProperty(&quot;Parse Timings&quot;, format(parseTime));</span>
+<span class="fc" id="L136">    jsonObject.addProperty(&quot;Time in Spark&quot;, difference(sparkTime, parseTime));</span>
+<span class="fc" id="L137">    jsonObject.addProperty(&quot;Time waiting for service&quot;, format(serviceTime));</span>
+<span class="fc" id="L138">    jsonObject.addProperty(&quot;Bytes/s&quot;, perSecond(serviceTime, getBytesRead()));</span>
+<span class="fc" id="L139">    jsonObject.addProperty(&quot;Rows/s&quot;, perSecond(parseTime, getRowsRead()));</span>
+<span class="fc" id="L140">    jsonObject.addProperty(&quot;Bytes&quot;, getBytesRead());</span>
+<span class="fc" id="L141">    jsonObject.addProperty(&quot;Rows&quot;, getRowsRead());</span>
+<span class="fc" id="L142">    jsonObject.addProperty(&quot;I/O time in ms&quot;, getScanTimeInMilliSec());</span>
+<span class="fc" id="L143">    log.info(&quot;ReadStream Metrics :{}&quot;, new Gson().toJson(jsonObject));</span>
+<span class="fc" id="L144">    bigQueryMetrics.incrementBytesReadCounter(getBytesRead());</span>
+<span class="fc" id="L145">    bigQueryMetrics.incrementRowsReadCounter(getRowsRead());</span>
+<span class="fc" id="L146">    bigQueryMetrics.updateScanTime(getScanTimeInMilliSec());</span>
+<span class="fc" id="L147">    bigQueryMetrics.updateParseTime(getParseTimeInMilliSec());</span>
+<span class="fc" id="L148">    bigQueryMetrics.updateTimeInSpark(getTimeInSparkInMilliSec());</span>
+<span class="fc" id="L149">    readSessionMetrics.ifPresent(</span>
+        metrics -&gt; {
+<span class="fc" id="L151">          metrics.incrementBytesReadAccumulator(getBytesRead());</span>
+<span class="fc" id="L152">          metrics.incrementRowsReadAccumulator(getRowsRead());</span>
+<span class="fc" id="L153">          metrics.incrementParseTimeAccumulator(getParseTimeInMilliSec());</span>
+<span class="fc" id="L154">          metrics.incrementScanTimeAccumulator(getScanTimeInMilliSec());</span>
+<span class="fc" id="L155">        });</span>
+<span class="fc" id="L156">    linesLogged++;</span>
+<span class="fc" id="L157">  }</span>
+
+  @Override
+  public void nextBatchNeeded() {
+<span class="fc" id="L161">    sparkTime.finish();</span>
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">    if (((sparkTime.getSamples() + 1) &amp; ((1 &lt;&lt; logIntervalPowerOf2) - 1)) == 0) {</span>
+<span class="nc" id="L163">      logData();</span>
+    }
+<span class="fc" id="L165">  }</span>
+
+  @Override
+  public BigQueryStorageReadRowsTracer forkWithPrefix(String id) {
+<span class="nc" id="L169">    return new LoggingBigQueryStorageReadRowsTracer(</span>
+        &quot;id-&quot; + id + &quot;-&quot; + streamName, logIntervalPowerOf2, bigQueryMetrics, readSessionMetrics);
+  }
+
+  @Override
+  public long getBytesRead() {
+<span class="fc" id="L175">    return bytes;</span>
+  }
+
+  @Override
+  public long getRowsRead() {
+<span class="fc" id="L180">    return rows;</span>
+  }
+
+  @Override
+  public long getScanTimeInMilliSec() {
+<span class="fc" id="L185">    return serviceTime.getAccumulatedTime().toMillis();</span>
+  }
+
+  @Override
+  public long getParseTimeInMilliSec() {
+<span class="fc" id="L190">    return parseTime.getAccumulatedTime().toMillis();</span>
+  }
+
+  @Override
+  public long getTimeInSparkInMilliSec() {
+<span class="fc" id="L195">    return sparkTime.getAccumulatedTime().minus(parseTime.getAccumulatedTime()).toMillis();</span>
+  }
+
+  String getStreamName() {
+<span class="nc" id="L199">    return streamName;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

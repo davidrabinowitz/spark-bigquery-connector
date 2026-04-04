@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryProxyTransporterBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryProxyTransporterBuilder.java</span></div><h1>BigQueryProxyTransporterBuilder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.http.apache.v2.ApacheHttpTransport;
+import com.google.api.core.ApiFunction;
+import com.google.auth.http.HttpTransportFactory;
+import io.grpc.HttpConnectProxiedSocketAddress;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.ProxiedSocketAddress;
+import io.grpc.ProxyDetector;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.URI;
+import java.util.Optional;
+import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.Credentials;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.HttpClientBuilder;
+
+<span class="nc" id="L38">public class BigQueryProxyTransporterBuilder {</span>
+
+  public static ApiFunction&lt;ManagedChannelBuilder, ManagedChannelBuilder&gt;
+      createGrpcChannelConfigurator(
+          Optional&lt;URI&gt; proxyAddress,
+          Optional&lt;String&gt; proxyUsername,
+          Optional&lt;String&gt; proxyPassword) {
+<span class="nc bnc" id="L45" title="All 2 branches missed.">    if (!proxyAddress.isPresent()) {</span>
+<span class="nc" id="L46">      return null;</span>
+    }
+<span class="nc" id="L48">    checkProxyParamsValidity(proxyUsername, proxyPassword);</span>
+
+<span class="nc" id="L50">    URI proxyUri = proxyAddress.get();</span>
+<span class="nc" id="L51">    String httpProxyHost = proxyUri.getHost();</span>
+<span class="nc" id="L52">    int httpProxyPort = proxyUri.getPort();</span>
+<span class="nc" id="L53">    final InetSocketAddress proxySocketAddress =</span>
+        new InetSocketAddress(httpProxyHost, httpProxyPort);
+
+<span class="nc" id="L56">    return new ApiFunction&lt;ManagedChannelBuilder, ManagedChannelBuilder&gt;() {</span>
+      @Override
+      public ManagedChannelBuilder apply(ManagedChannelBuilder input) {
+<span class="nc" id="L59">        return input.proxyDetector(</span>
+<span class="nc" id="L60">            new ProxyDetector() {</span>
+              @Override
+              public ProxiedSocketAddress proxyFor(SocketAddress targetServerAddress) {
+                HttpConnectProxiedSocketAddress.Builder proxySocketBuilder =
+<span class="nc" id="L64">                    HttpConnectProxiedSocketAddress.newBuilder()</span>
+<span class="nc" id="L65">                        .setTargetAddress((InetSocketAddress) targetServerAddress)</span>
+<span class="nc" id="L66">                        .setProxyAddress(proxySocketAddress);</span>
+
+<span class="nc bnc" id="L68" title="All 4 branches missed.">                if (proxyUsername.isPresent() &amp;&amp; proxyPassword.isPresent()) {</span>
+<span class="nc" id="L69">                  proxySocketBuilder.setUsername(proxyUsername.get());</span>
+<span class="nc" id="L70">                  proxySocketBuilder.setPassword(proxyPassword.get());</span>
+                }
+
+<span class="nc" id="L73">                return proxySocketBuilder.build();</span>
+              }
+            });
+      }
+    };
+  }
+
+  public static HttpTransportFactory createHttpTransportFactory(
+      Optional&lt;URI&gt; proxyAddress, Optional&lt;String&gt; proxyUsername, Optional&lt;String&gt; proxyPassword) {
+<span class="pc bpc" id="L82" title="1 of 2 branches missed.">    if (!proxyAddress.isPresent()) {</span>
+<span class="fc" id="L83">      return null;</span>
+    }
+<span class="nc" id="L85">    checkProxyParamsValidity(proxyUsername, proxyPassword);</span>
+
+<span class="nc" id="L87">    URI proxyUri = proxyAddress.get();</span>
+<span class="nc" id="L88">    String httpProxyHost = proxyUri.getHost();</span>
+<span class="nc" id="L89">    int httpProxyPort = proxyUri.getPort();</span>
+<span class="nc" id="L90">    final HttpHost proxyHost = new HttpHost(httpProxyHost, httpProxyPort);</span>
+<span class="nc" id="L91">    HttpClientBuilder httpClientBuilder = HttpClientBuilder.create().setProxy(proxyHost);</span>
+
+<span class="nc bnc" id="L93" title="All 4 branches missed.">    if (proxyUsername.isPresent() &amp;&amp; proxyPassword.isPresent()) {</span>
+<span class="nc" id="L94">      Credentials proxyCredentials =</span>
+<span class="nc" id="L95">          new UsernamePasswordCredentials(proxyUsername.get(), proxyPassword.get());</span>
+<span class="nc" id="L96">      CredentialsProvider credentialsProvider = new BasicCredentialsProvider();</span>
+<span class="nc" id="L97">      credentialsProvider.setCredentials(</span>
+<span class="nc" id="L98">          new AuthScope(proxyUri.getHost(), proxyUri.getPort()), proxyCredentials);</span>
+<span class="nc" id="L99">      httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider);</span>
+    }
+
+<span class="nc" id="L102">    return new BigQueryHttpTransportFactory(httpClientBuilder);</span>
+  }
+
+  public static class BigQueryHttpTransportFactory implements HttpTransportFactory {
+    private HttpClientBuilder httpClientBuilder;
+
+<span class="nc" id="L108">    public BigQueryHttpTransportFactory() {</span>
+      // empty constructor:
+      // to solve the InstantiationException in ServiceAccountCredentials at readObject
+<span class="nc" id="L111">    }</span>
+
+<span class="nc" id="L113">    public BigQueryHttpTransportFactory(HttpClientBuilder httpClientBuilder) {</span>
+<span class="nc" id="L114">      this.httpClientBuilder = httpClientBuilder;</span>
+<span class="nc" id="L115">    }</span>
+
+    @Override
+    public HttpTransport create() {
+<span class="nc" id="L119">      return new ApacheHttpTransport(httpClientBuilder.build());</span>
+    }
+  }
+
+  public static void checkProxyParamsValidity(
+      Optional&lt;String&gt; proxyUsername, Optional&lt;String&gt; proxyPassword)
+      throws IllegalArgumentException {
+<span class="pc bpc" id="L126" title="1 of 2 branches missed.">    if (proxyUsername.isPresent() != proxyPassword.isPresent()) {</span>
+<span class="nc" id="L127">      throw new IllegalArgumentException(</span>
+          &quot;Both proxyUsername and proxyPassword should be defined or not defined together&quot;);
+    }
+<span class="fc" id="L130">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

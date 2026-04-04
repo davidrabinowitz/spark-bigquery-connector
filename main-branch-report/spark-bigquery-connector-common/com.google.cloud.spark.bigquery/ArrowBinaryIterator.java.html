@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ArrowBinaryIterator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery</a> &gt; <span class="el_source">ArrowBinaryIterator.java</span></div><h1>ArrowBinaryIterator.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery;
+
+import com.google.cloud.bigquery.connector.common.ArrowReaderIterator;
+import com.google.cloud.bigquery.connector.common.ArrowUtil;
+import com.google.cloud.bigquery.connector.common.BigQueryConnectorException;
+import com.google.cloud.bigquery.connector.common.BigQueryStorageReadRowsTracer;
+import com.google.cloud.bigquery.connector.common.DecompressReadRowsResponse;
+import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
+import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions.ResponseCompressionCodec;
+import com.google.common.collect.ImmutableList;
+import com.google.protobuf.ByteString;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.SequenceInputStream;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.apache.arrow.compression.CommonsCompressionFactory;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.ipc.ArrowStreamReader;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.vectorized.ColumnVector;
+import org.apache.spark.sql.vectorized.ColumnarBatch;
+
+public class ArrowBinaryIterator implements Iterator&lt;InternalRow&gt; {
+
+<span class="nc" id="L49">  private static long maxAllocation = Long.MAX_VALUE;</span>
+  private final Optional&lt;BigQueryStorageReadRowsTracer&gt; bigQueryStorageReadRowsTracer;
+  ArrowReaderIterator arrowReaderIterator;
+  Iterator&lt;InternalRow&gt; currentIterator;
+  List&lt;String&gt; columnsInOrder;
+  Map&lt;String, StructField&gt; userProvidedFieldMap;
+  private final boolean enableTimestampRebase;
+
+  public ArrowBinaryIterator(
+      List&lt;String&gt; columnsInOrder,
+      ByteString schema,
+      ReadRowsResponse readRowsResponse,
+      Optional&lt;StructType&gt; userProvidedSchema,
+      Optional&lt;BigQueryStorageReadRowsTracer&gt; bigQueryStorageReadRowsTracer,
+      ResponseCompressionCodec responseCompressionCodec) {
+<span class="nc" id="L64">    this(</span>
+        columnsInOrder,
+        schema,
+        readRowsResponse,
+        userProvidedSchema,
+        bigQueryStorageReadRowsTracer,
+        responseCompressionCodec,
+        true);
+<span class="nc" id="L72">  }</span>
+
+  public ArrowBinaryIterator(
+      List&lt;String&gt; columnsInOrder,
+      ByteString schema,
+      ReadRowsResponse readRowsResponse,
+      Optional&lt;StructType&gt; userProvidedSchema,
+      Optional&lt;BigQueryStorageReadRowsTracer&gt; bigQueryStorageReadRowsTracer,
+      ResponseCompressionCodec responseCompressionCodec,
+<span class="nc" id="L81">      boolean enableTimestampRebase) {</span>
+<span class="nc" id="L82">    BufferAllocator allocator =</span>
+<span class="nc" id="L83">        ArrowUtil.newRootAllocator(maxAllocation)</span>
+<span class="nc" id="L84">            .newChildAllocator(&quot;ArrowBinaryIterator&quot;, 0, maxAllocation);</span>
+
+    try {
+<span class="nc" id="L87">      SequenceInputStream bytesWithSchemaStream =</span>
+          new SequenceInputStream(
+<span class="nc" id="L89">              new ByteArrayInputStream(schema.toByteArray()),</span>
+<span class="nc" id="L90">              DecompressReadRowsResponse.decompressArrowRecordBatch(</span>
+                  readRowsResponse, responseCompressionCodec));
+<span class="nc" id="L92">      ArrowStreamReader arrowStreamReader =</span>
+          new ArrowStreamReader(
+              bytesWithSchemaStream, allocator, CommonsCompressionFactory.INSTANCE);
+<span class="nc" id="L95">      arrowReaderIterator = new ArrowReaderIterator(arrowStreamReader);</span>
+<span class="nc" id="L96">    } catch (IOException e) {</span>
+<span class="nc" id="L97">      throw new BigQueryConnectorException(</span>
+          &quot;Failed to decode Arrow binary for a ReadRowsResponse&quot;, e);
+<span class="nc" id="L99">    }</span>
+<span class="nc" id="L100">    currentIterator = ImmutableList.&lt;InternalRow&gt;of().iterator();</span>
+<span class="nc" id="L101">    this.columnsInOrder = columnsInOrder;</span>
+
+<span class="nc" id="L103">    List&lt;StructField&gt; userProvidedFieldList =</span>
+<span class="nc" id="L104">        Arrays.stream(userProvidedSchema.orElse(new StructType()).fields())</span>
+<span class="nc" id="L105">            .collect(Collectors.toList());</span>
+
+<span class="nc" id="L107">    this.userProvidedFieldMap =</span>
+<span class="nc" id="L108">        userProvidedFieldList.stream()</span>
+<span class="nc" id="L109">            .collect(Collectors.toMap(StructField::name, Function.identity()));</span>
+
+<span class="nc" id="L111">    this.bigQueryStorageReadRowsTracer = bigQueryStorageReadRowsTracer;</span>
+<span class="nc" id="L112">    this.enableTimestampRebase = enableTimestampRebase;</span>
+<span class="nc" id="L113">  }</span>
+
+  @Override
+  public boolean hasNext() {
+<span class="nc bnc" id="L117" title="All 2 branches missed.">    while (!currentIterator.hasNext()) {</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">      if (!arrowReaderIterator.hasNext()) {</span>
+<span class="nc" id="L119">        return false;</span>
+      }
+<span class="nc" id="L121">      currentIterator = toArrowRows(arrowReaderIterator.next(), columnsInOrder);</span>
+    }
+
+<span class="nc" id="L124">    return currentIterator.hasNext();</span>
+  }
+
+  @Override
+  public InternalRow next() {
+<span class="nc" id="L129">    return currentIterator.next();</span>
+  }
+
+  private Iterator&lt;InternalRow&gt; toArrowRows(VectorSchemaRoot root, List&lt;String&gt; namesInOrder) {
+<span class="nc" id="L133">    ColumnVector[] columns =</span>
+<span class="nc" id="L134">        namesInOrder.stream()</span>
+<span class="nc" id="L135">            .map(name -&gt; root.getVector(name))</span>
+<span class="nc" id="L136">            .map(</span>
+                vector -&gt;
+<span class="nc" id="L138">                    ArrowSchemaConverter.newArrowSchemaConverter(</span>
+<span class="nc" id="L139">                        vector, userProvidedFieldMap.get(vector.getName()), enableTimestampRebase))</span>
+<span class="nc" id="L140">            .collect(Collectors.toList())</span>
+<span class="nc" id="L141">            .toArray(new ColumnVector[0]);</span>
+
+<span class="nc" id="L143">    ColumnarBatch batch = new ColumnarBatch(columns);</span>
+<span class="nc" id="L144">    batch.setNumRows(root.getRowCount());</span>
+<span class="nc" id="L145">    bigQueryStorageReadRowsTracer.ifPresent(tracer -&gt; tracer.rowsParseFinished(root.getRowCount()));</span>
+<span class="nc" id="L146">    return batch.rowIterator();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>CreatableRelationProviderHelper.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.write</a> &gt; <span class="el_source">CreatableRelationProviderHelper.java</span></div><h1>CreatableRelationProviderHelper.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.write;
+
+import static com.google.cloud.spark.bigquery.SparkBigQueryUtil.scalaMapToJavaMap;
+
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.bigquery.connector.common.BigQueryUtil;
+import com.google.cloud.spark.bigquery.DataSourceVersion;
+import com.google.cloud.spark.bigquery.InjectorBuilder;
+import com.google.cloud.spark.bigquery.SparkBigQueryConfig;
+import com.google.cloud.spark.bigquery.write.context.BigQueryDataSourceWriterModule;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.inject.Injector;
+import java.util.Map;
+import java.util.UUID;
+import org.apache.spark.sql.*;
+import org.apache.spark.sql.sources.BaseRelation;
+import org.apache.spark.sql.types.StructType;
+
+<span class="fc" id="L34">public class CreatableRelationProviderHelper {</span>
+
+  public BaseRelation createRelation(
+      SQLContext sqlContext,
+      SaveMode saveMode,
+      scala.collection.immutable.Map&lt;String, String&gt; parameters,
+      Dataset&lt;Row&gt; data,
+      Map&lt;String, String&gt; customDefaults) {
+<span class="fc" id="L42">    Map&lt;String, String&gt; properties = scalaMapToJavaMap(parameters);</span>
+<span class="fc" id="L43">    return createRelation(sqlContext, saveMode, properties, data, customDefaults);</span>
+  }
+
+  public BaseRelation createRelation(
+      SQLContext sqlContext,
+      SaveMode saveMode,
+      Map&lt;String, String&gt; parameters,
+      Dataset&lt;Row&gt; data,
+      Map&lt;String, String&gt; customDefaults) {
+<span class="fc" id="L52">    BigQueryInsertableRelationBase relation =</span>
+<span class="fc" id="L53">        createBigQueryInsertableRelation(sqlContext, data, parameters, saveMode, customDefaults);</span>
+
+<span class="pc bpc" id="L55" title="1 of 5 branches missed.">    switch (saveMode) {</span>
+      case Append:
+<span class="fc" id="L57">        relation.insert(data, /* overwrite */ false);</span>
+<span class="fc" id="L58">        break;</span>
+      case Overwrite:
+<span class="fc" id="L60">        relation.insert(data, /* overwrite */ true);</span>
+<span class="fc" id="L61">        break;</span>
+      case ErrorIfExists:
+<span class="fc bfc" id="L63" title="All 2 branches covered.">        if (!relation.exists()) {</span>
+<span class="fc" id="L64">          relation.insert(data, /* overwrite */ false);</span>
+<span class="fc" id="L65">          break;</span>
+        } else {
+<span class="fc" id="L67">          throw new IllegalArgumentException(</span>
+              &quot;SaveMode is set to ErrorIfExists and Table &quot;
+<span class="fc" id="L69">                  + BigQueryUtil.friendlyTableName(relation.getTableId())</span>
+                  + &quot;already exists. Did you want to add data to the table by setting &quot;
+                  + &quot;the SaveMode to Append? Example: &quot;
+                  + &quot;df.write.format.options.mode(SaveMode.Append).save()&quot;);
+        }
+      case Ignore:
+<span class="fc bfc" id="L75" title="All 2 branches covered.">        if (!relation.exists()) {</span>
+<span class="fc" id="L76">          relation.insert(data, /* overwrite */ false);</span>
+          break;
+        }
+    }
+
+<span class="fc" id="L81">    return relation;</span>
+  }
+
+  @VisibleForTesting
+  BigQueryInsertableRelationBase createBigQueryInsertableRelation(
+      SQLContext sqlContext,
+      Dataset&lt;Row&gt; data,
+      Map&lt;String, String&gt; properties,
+      SaveMode saveMode,
+      Map&lt;String, String&gt; customDefaults) {
+<span class="fc" id="L91">    Injector injector =</span>
+        new InjectorBuilder()
+<span class="fc" id="L93">            .withDataSourceVersion(DataSourceVersion.V1)</span>
+<span class="fc" id="L94">            .withSpark(sqlContext.sparkSession())</span>
+<span class="fc" id="L95">            .withSchema(data.schema())</span>
+<span class="fc" id="L96">            .withOptions(properties)</span>
+<span class="fc" id="L97">            .withCustomDefaults(customDefaults)</span>
+<span class="fc" id="L98">            .withTableIsMandatory(true)</span>
+<span class="fc" id="L99">            .build();</span>
+
+<span class="fc" id="L101">    return createBigQueryInsertableRelationInternal(data.schema(), saveMode, injector);</span>
+  }
+
+  public BigQueryInsertableRelationBase createBigQueryInsertableRelation(
+      SQLContext sqlContext, StructType schema, SaveMode saveMode, SparkBigQueryConfig config) {
+<span class="nc" id="L106">    Injector injector =</span>
+        new InjectorBuilder()
+<span class="nc" id="L108">            .withDataSourceVersion(DataSourceVersion.V1)</span>
+<span class="nc" id="L109">            .withSpark(sqlContext.sparkSession())</span>
+<span class="nc" id="L110">            .withSchema(schema)</span>
+<span class="nc" id="L111">            .withConfig(config)</span>
+<span class="nc" id="L112">            .withTableIsMandatory(true)</span>
+<span class="nc" id="L113">            .build();</span>
+
+<span class="nc" id="L115">    return createBigQueryInsertableRelationInternal(schema, saveMode, injector);</span>
+  }
+
+  public BigQueryInsertableRelationBase createBigQueryInsertableRelationFromInjector(
+      StructType schema, SaveMode saveMode, Injector injector) {
+<span class="nc" id="L120">    return createBigQueryInsertableRelationInternal(schema, saveMode, injector);</span>
+  }
+
+  private BigQueryInsertableRelationBase createBigQueryInsertableRelationInternal(
+      StructType schema, SaveMode saveMode, Injector injector) {
+<span class="fc" id="L125">    SparkBigQueryConfig config = injector.getInstance(SparkBigQueryConfig.class);</span>
+<span class="fc" id="L126">    BigQueryClient bigQueryClient = injector.getInstance(BigQueryClient.class);</span>
+<span class="fc" id="L127">    SQLContext sqlContext = injector.getInstance(SparkSession.class).sqlContext();</span>
+
+<span class="fc" id="L129">    SparkBigQueryConfig.WriteMethod writeMethod = config.getWriteMethod();</span>
+<span class="fc bfc" id="L130" title="All 2 branches covered.">    if (writeMethod == SparkBigQueryConfig.WriteMethod.INDIRECT) {</span>
+<span class="fc" id="L131">      return new BigQueryDeprecatedIndirectInsertableRelation(bigQueryClient, sqlContext, config);</span>
+    }
+    // Need DataSourceWriterContext
+<span class="fc" id="L134">    Injector writerInjector =</span>
+<span class="fc" id="L135">        injector.createChildInjector(</span>
+            new BigQueryDataSourceWriterModule(
+<span class="fc" id="L137">                config, UUID.randomUUID().toString(), schema, saveMode));</span>
+<span class="fc" id="L138">    return new BigQueryDataSourceWriterInsertableRelation(</span>
+        bigQueryClient, sqlContext, config, writerInjector);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

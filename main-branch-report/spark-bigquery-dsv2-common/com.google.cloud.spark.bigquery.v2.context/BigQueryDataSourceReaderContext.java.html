@@ -1,0 +1,570 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryDataSourceReaderContext.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-dsv2-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.v2.context</a> &gt; <span class="el_source">BigQueryDataSourceReaderContext.java</span></div><h1>BigQueryDataSourceReaderContext.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2021 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.v2.context;
+
+import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.bigquery.connector.common.BigQueryClientFactory;
+import com.google.cloud.bigquery.connector.common.BigQueryTracerFactory;
+import com.google.cloud.bigquery.connector.common.BigQueryUtil;
+import com.google.cloud.bigquery.connector.common.LazyInitializationSupplier;
+import com.google.cloud.bigquery.connector.common.ReadSessionCreator;
+import com.google.cloud.bigquery.connector.common.ReadSessionCreatorConfig;
+import com.google.cloud.bigquery.connector.common.ReadSessionResponse;
+import com.google.cloud.bigquery.storage.v1.DataFormat;
+import com.google.cloud.bigquery.storage.v1.ReadSession;
+import com.google.cloud.bigquery.storage.v1.ReadStream;
+import com.google.cloud.spark.bigquery.ReadRowsResponseToInternalRowIteratorConverter;
+import com.google.cloud.spark.bigquery.SchemaConverters;
+import com.google.cloud.spark.bigquery.SchemaConvertersConfiguration;
+import com.google.cloud.spark.bigquery.SparkBigQueryConfig;
+import com.google.cloud.spark.bigquery.SparkBigQueryUtil;
+import com.google.cloud.spark.bigquery.SparkFilterUtils;
+import com.google.cloud.spark.bigquery.direct.BigQueryRDDFactory;
+import com.google.cloud.spark.bigquery.metrics.DataOrigin;
+import com.google.cloud.spark.bigquery.metrics.SparkBigQueryReadSessionMetrics;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Streams;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+import org.apache.spark.sql.SQLContext;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.vectorized.ColumnarBatch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class BigQueryDataSourceReaderContext {
+
+<span class="fc" id="L74">  private static final Logger logger =</span>
+<span class="fc" id="L75">      LoggerFactory.getLogger(BigQueryDataSourceReaderContext.class);</span>
+
+<span class="fc" id="L77">  private static StatisticsContext UNKNOWN_STATISTICS =</span>
+<span class="fc" id="L78">      new StatisticsContext() {</span>
+
+        @Override
+        public OptionalLong sizeInBytes() {
+<span class="fc" id="L82">          return OptionalLong.empty();</span>
+        }
+
+        @Override
+        public OptionalLong numRows() {
+<span class="nc" id="L87">          return OptionalLong.empty();</span>
+        }
+      };
+
+  private final TableInfo table;
+  private final TableId tableId;
+  private final ReadSessionCreatorConfig readSessionCreatorConfig;
+  private final BigQueryClient bigQueryClient;
+  private final BigQueryClientFactory bigQueryReadClientFactory;
+  private final BigQueryTracerFactory bigQueryTracerFactory;
+  private final ReadSessionCreator readSessionCreator;
+  private final SparkBigQueryConfig options;
+  private final SQLContext sqlContext;
+  private final SparkSession sparkSession;
+  private final BigQueryRDDFactory bigQueryRDDFactory;
+  private final Optional&lt;String&gt; globalFilter;
+  private final String applicationId;
+  private Optional&lt;StructType&gt; schema;
+  private Optional&lt;StructType&gt; userProvidedSchema;
+<span class="fc" id="L106">  private final Set&lt;Filter&gt; pushedFilters = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L107">  private Filter[] allFilters = new Filter[] {};</span>
+  private Map&lt;String, StructField&gt; fields;
+  private ImmutableList&lt;String&gt; selectedFields;
+  private List&lt;ArrowInputPartitionContext&gt; plannedInputPartitionContexts;
+  // Lazy loading using Supplier will ensure that createReadSession is called only once and
+  // readSessionResponse is cached.
+  // Purpose is to create read session either in estimateStatistics or planInputPartitionContexts,
+  // whichever is called first.
+  // In Spark 3.1 connector, &quot;estimateStatistics&quot; is called before
+  // &quot;planBatchInputPartitionContexts&quot; or
+  // &quot;planInputPartitionContexts&quot;. We will use this to get table statistics in estimateStatistics.
+  private LazyInitializationSupplier&lt;ReadSessionResponse&gt; readSessionResponse;
+<span class="fc" id="L119">  private final ExecutorService asyncReadSessionExecutor = Executors.newSingleThreadExecutor();</span>
+<span class="fc" id="L120">  private boolean isBuilt = false;</span>
+  private final BigQueryClient.ReadTableOptions readTableOptions;
+
+  public BigQueryDataSourceReaderContext(
+      TableInfo table,
+      BigQueryClient bigQueryClient,
+      BigQueryClientFactory bigQueryReadClientFactory,
+      BigQueryTracerFactory tracerFactory,
+      ReadSessionCreatorConfig readSessionCreatorConfig,
+      Optional&lt;String&gt; globalFilter,
+      Optional&lt;StructType&gt; schema,
+      String applicationId,
+      SparkBigQueryConfig options,
+      SQLContext sqlContext,
+      SparkSession sparkSession,
+<span class="fc" id="L135">      BigQueryClient.ReadTableOptions readTableOptions) {</span>
+<span class="fc" id="L136">    this.table = table;</span>
+<span class="fc" id="L137">    this.tableId = table.getTableId();</span>
+<span class="fc" id="L138">    this.readSessionCreatorConfig = readSessionCreatorConfig;</span>
+<span class="fc" id="L139">    this.bigQueryClient = bigQueryClient;</span>
+<span class="fc" id="L140">    this.bigQueryReadClientFactory = bigQueryReadClientFactory;</span>
+<span class="fc" id="L141">    this.bigQueryTracerFactory = tracerFactory;</span>
+<span class="fc" id="L142">    this.sparkSession = sparkSession;</span>
+<span class="fc" id="L143">    this.readTableOptions = readTableOptions;</span>
+<span class="fc" id="L144">    this.readSessionCreator =</span>
+        new ReadSessionCreator(readSessionCreatorConfig, bigQueryClient, bigQueryReadClientFactory);
+<span class="fc" id="L146">    this.globalFilter = globalFilter;</span>
+<span class="fc" id="L147">    SchemaConverters sc = SchemaConverters.from(SchemaConvertersConfiguration.from(options));</span>
+<span class="fc" id="L148">    StructType convertedSchema = sc.toSpark(sc.getSchemaWithPseudoColumns(table));</span>
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">    if (schema.isPresent()) {</span>
+<span class="fc" id="L150">      this.schema = schema;</span>
+<span class="fc" id="L151">      this.userProvidedSchema = schema;</span>
+    } else {
+<span class="nc" id="L153">      this.schema = Optional.of(convertedSchema);</span>
+<span class="nc" id="L154">      this.userProvidedSchema = Optional.empty();</span>
+    }
+    // We want to keep the key order
+<span class="fc" id="L157">    this.fields = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">    for (StructField field : convertedSchema.fields()) {</span>
+<span class="fc" id="L159">      fields.put(field.name(), field);</span>
+    }
+<span class="fc" id="L161">    this.applicationId = applicationId;</span>
+<span class="fc" id="L162">    this.options = options;</span>
+<span class="fc" id="L163">    this.sqlContext = sqlContext;</span>
+<span class="fc" id="L164">    this.bigQueryRDDFactory =</span>
+        new BigQueryRDDFactory(
+            bigQueryClient, bigQueryReadClientFactory, bigQueryTracerFactory, options, sqlContext);
+<span class="fc" id="L167">    resetReadSessionResponse();</span>
+<span class="fc" id="L168">  }</span>
+
+  private void resetReadSessionResponse() {
+<span class="fc" id="L171">    this.readSessionResponse = new LazyInitializationSupplier&lt;&gt;(this::createReadSession);</span>
+<span class="fc" id="L172">  }</span>
+
+  public StructType readSchema() {
+    // TODO: rely on Java code
+<span class="fc" id="L176">    return schema.orElseGet(</span>
+        () -&gt; {
+<span class="nc" id="L178">          SchemaConverters sc = SchemaConverters.from(SchemaConvertersConfiguration.from(options));</span>
+<span class="nc" id="L179">          return sc.toSpark(sc.getSchemaWithPseudoColumns(table));</span>
+        });
+  }
+
+  public boolean enableBatchRead() {
+<span class="fc bfc" id="L184" title="All 4 branches covered.">    return readSessionCreatorConfig.getReadDataFormat() == DataFormat.ARROW &amp;&amp; !isEmptySchema();</span>
+  }
+
+  public Stream&lt;InputPartitionContext&lt;InternalRow&gt;&gt; planInputPartitionContexts() {
+<span class="fc bfc" id="L188" title="All 2 branches covered.">    if (isEmptySchema()) {</span>
+      // create empty projection
+<span class="fc" id="L190">      return createEmptyProjectionPartitions();</span>
+    }
+
+<span class="fc" id="L193">    ReadSession readSession = readSessionResponse.get().getReadSession();</span>
+
+<span class="fc" id="L195">    return readSession.getStreamsList().stream()</span>
+<span class="fc" id="L196">        .map(</span>
+            stream -&gt;
+<span class="fc" id="L198">                new BigQueryInputPartitionContext(</span>
+                    bigQueryReadClientFactory,
+<span class="fc" id="L200">                    stream.getName(),</span>
+<span class="fc" id="L201">                    readSessionCreatorConfig.toReadRowsHelperOptions(),</span>
+<span class="fc" id="L202">                    createConverter(</span>
+<span class="fc" id="L203">                        selectedFields, readSessionResponse.get(), userProvidedSchema)));</span>
+  }
+
+  public Optional&lt;String&gt; getCombinedFilter() {
+<span class="fc" id="L207">    return BigQueryUtil.emptyIfNeeded(</span>
+<span class="fc" id="L208">        SparkFilterUtils.getCompiledFilter(</span>
+<span class="fc" id="L209">            readSessionCreatorConfig.getPushAllFilters(),</span>
+<span class="fc" id="L210">            readSessionCreatorConfig.getReadDataFormat(),</span>
+            globalFilter,
+<span class="fc" id="L212">            pushedFilters.toArray(new Filter[0])));</span>
+  }
+
+  public DataOrigin getDataOrigin() {
+<span class="pc bpc" id="L216" title="1 of 2 branches missed.">    if (BigQueryUtil.isBigLakeManagedTable(table)</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">        || table.getDefinition().getType() == TableDefinition.Type.EXTERNAL) {</span>
+<span class="fc" id="L218">      return DataOrigin.BIGLAKE;</span>
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">    } else if (table.getDefinition().getType() == TableDefinition.Type.MATERIALIZED_VIEW</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">        || table.getDefinition().getType() == TableDefinition.Type.VIEW) {</span>
+<span class="fc" id="L221">      return DataOrigin.VIEW;</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">    } else if (readTableOptions.query().isPresent()) {</span>
+<span class="fc" id="L223">      return DataOrigin.QUERY;</span>
+    } else {
+<span class="fc" id="L225">      return DataOrigin.TABLE;</span>
+    }
+  }
+
+  public Stream&lt;InputPartitionContext&lt;ColumnarBatch&gt;&gt; planBatchInputPartitionContexts() {
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">    if (!enableBatchRead()) {</span>
+<span class="nc" id="L231">      throw new IllegalStateException(&quot;Batch reads should not be enabled&quot;);</span>
+    }
+
+<span class="fc" id="L234">    ReadSession readSession = readSessionResponse.get().getReadSession();</span>
+<span class="fc" id="L235">    long currentTimeMillis = System.currentTimeMillis();</span>
+<span class="fc" id="L236">    SparkBigQueryReadSessionMetrics sparkBigQueryReadSessionMetrics =</span>
+<span class="fc" id="L237">        SparkBigQueryReadSessionMetrics.from(</span>
+            sparkSession,
+            readSession,
+            currentTimeMillis,
+<span class="fc" id="L241">            readSessionCreatorConfig.getReadDataFormat(),</span>
+<span class="fc" id="L242">            getDataOrigin(),</span>
+<span class="fc" id="L243">            readSession.getStreamsCount());</span>
+
+<span class="fc" id="L245">    sparkSession.sparkContext().addSparkListener(sparkBigQueryReadSessionMetrics);</span>
+
+<span class="fc" id="L247">    ImmutableList&lt;String&gt; tempSelectedFields = selectedFields;</span>
+<span class="pc bpc" id="L248" title="1 of 2 branches missed.">    if (tempSelectedFields.isEmpty()) {</span>
+      // means select *
+<span class="nc" id="L250">      Schema tableSchema =</span>
+<span class="nc" id="L251">          SchemaConverters.from(SchemaConvertersConfiguration.from(options))</span>
+<span class="nc" id="L252">              .getSchemaWithPseudoColumns(readSessionResponse.get().getReadTableInfo());</span>
+<span class="nc" id="L253">      tempSelectedFields =</span>
+<span class="nc" id="L254">          tableSchema.getFields().stream()</span>
+<span class="nc" id="L255">              .map(Field::getName)</span>
+<span class="nc" id="L256">              .collect(ImmutableList.toImmutableList());</span>
+    }
+
+<span class="fc" id="L259">    ImmutableList&lt;String&gt; partitionSelectedFields = tempSelectedFields;</span>
+<span class="fc" id="L260">    Optional&lt;StructType&gt; arrowSchema = Optional.of(userProvidedSchema.orElse(readSchema()));</span>
+<span class="fc" id="L261">    plannedInputPartitionContexts =</span>
+<span class="fc" id="L262">        Streams.stream(</span>
+<span class="fc" id="L263">                Iterables.partition(</span>
+<span class="fc" id="L264">                    readSession.getStreamsList(), readSessionCreatorConfig.streamsPerPartition()))</span>
+<span class="fc" id="L265">            .map(</span>
+                streams -&gt;
+<span class="fc" id="L267">                    new ArrowInputPartitionContext(</span>
+                        bigQueryReadClientFactory,
+                        bigQueryTracerFactory,
+<span class="fc" id="L270">                        streams.stream()</span>
+<span class="fc" id="L271">                            .map(ReadStream::getName)</span>
+                            // This formulation is used to guarantee a serializable list.
+<span class="fc" id="L273">                            .collect(Collectors.toCollection(ArrayList::new)),</span>
+<span class="fc" id="L274">                        readSessionCreatorConfig.toReadRowsHelperOptions(),</span>
+                        partitionSelectedFields,
+<span class="fc" id="L276">                        readSessionResponse.get(),</span>
+                        arrowSchema,
+                        sparkBigQueryReadSessionMetrics,
+<span class="fc" id="L279">                        readSessionCreatorConfig.getResponseCompressionCodec(),</span>
+<span class="fc" id="L280">                        readSessionCreatorConfig.getEnableArrowTimestampRebase()))</span>
+<span class="fc" id="L281">            .collect(Collectors.toList());</span>
+<span class="fc" id="L282">    return plannedInputPartitionContexts.stream()</span>
+<span class="fc" id="L283">        .map(ctx -&gt; (InputPartitionContext&lt;ColumnarBatch&gt;) ctx);</span>
+  }
+
+  private boolean isEmptySchema() {
+<span class="fc" id="L287">    return schema.map(StructType::isEmpty).orElse(false);</span>
+  }
+
+  private ReadRowsResponseToInternalRowIteratorConverter createConverter(
+      ImmutableList&lt;String&gt; selectedFields,
+      ReadSessionResponse readSessionResponse,
+      Optional&lt;StructType&gt; userProvidedSchema) {
+    ReadRowsResponseToInternalRowIteratorConverter converter;
+<span class="fc" id="L295">    DataFormat format = readSessionCreatorConfig.getReadDataFormat();</span>
+<span class="pc bpc" id="L296" title="1 of 2 branches missed.">    if (format == DataFormat.AVRO) {</span>
+<span class="fc" id="L297">      Schema schema =</span>
+<span class="fc" id="L298">          SchemaConverters.from(SchemaConvertersConfiguration.from(options))</span>
+<span class="fc" id="L299">              .getSchemaWithPseudoColumns(readSessionResponse.getReadTableInfo());</span>
+<span class="pc bpc" id="L300" title="1 of 2 branches missed.">      if (selectedFields.isEmpty()) {</span>
+        // means select *
+<span class="nc" id="L302">        selectedFields =</span>
+<span class="nc" id="L303">            schema.getFields().stream()</span>
+<span class="nc" id="L304">                .map(Field::getName)</span>
+<span class="nc" id="L305">                .collect(ImmutableList.toImmutableList());</span>
+      } else {
+<span class="fc" id="L307">        Set&lt;String&gt; requiredColumnSet = ImmutableSet.copyOf(selectedFields);</span>
+<span class="fc" id="L308">        schema =</span>
+<span class="fc" id="L309">            Schema.of(</span>
+<span class="fc" id="L310">                schema.getFields().stream()</span>
+<span class="fc" id="L311">                    .filter(field -&gt; requiredColumnSet.contains(field.getName()))</span>
+<span class="fc" id="L312">                    .collect(Collectors.toList()));</span>
+      }
+<span class="fc" id="L314">      return ReadRowsResponseToInternalRowIteratorConverter.avro(</span>
+          schema,
+          selectedFields,
+<span class="fc" id="L317">          readSessionResponse.getReadSession().getAvroSchema().getSchema(),</span>
+          userProvidedSchema,
+<span class="fc" id="L319">          /* bigQueryStorageReadRowTracer */ Optional.empty(),</span>
+<span class="fc" id="L320">          SchemaConvertersConfiguration.from(options),</span>
+<span class="fc" id="L321">          readSessionCreatorConfig.getResponseCompressionCodec());</span>
+    }
+<span class="nc" id="L323">    throw new IllegalArgumentException(</span>
+<span class="nc" id="L324">        &quot;No known converted for &quot; + readSessionCreatorConfig.getReadDataFormat());</span>
+  }
+
+  private ReadSessionResponse createReadSession() {
+<span class="fc" id="L328">    selectedFields =</span>
+        schema
+<span class="fc" id="L330">            .map(requiredSchema -&gt; ImmutableList.copyOf(requiredSchema.fieldNames()))</span>
+<span class="fc" id="L331">            .orElse(ImmutableList.copyOf(fields.keySet()));</span>
+<span class="fc" id="L332">    Optional&lt;String&gt; filter = getCombinedFilter();</span>
+<span class="fc" id="L333">    ReadSessionResponse response = readSessionCreator.create(tableId, selectedFields, filter);</span>
+<span class="fc" id="L334">    logger.info(</span>
+        &quot;Got read session for {}: {} for application id: {}&quot;,
+<span class="fc" id="L336">        tableId.toString(),</span>
+<span class="fc" id="L337">        response.getReadSession().getName(),</span>
+        applicationId);
+<span class="fc" id="L339">    return response;</span>
+  }
+
+  Stream&lt;InputPartitionContext&lt;InternalRow&gt;&gt; createEmptyProjectionPartitions() {
+<span class="fc" id="L343">    Optional&lt;String&gt; filter = getCombinedFilter();</span>
+<span class="fc" id="L344">    long rowCount = bigQueryClient.calculateTableSize(tableId, filter);</span>
+<span class="fc" id="L345">    logger.info(&quot;Used optimized BQ count(*) path. Count: &quot; + rowCount);</span>
+<span class="fc" id="L346">    int partitionsCount = readSessionCreatorConfig.getDefaultParallelism();</span>
+<span class="fc" id="L347">    int partitionSize = (int) (rowCount / partitionsCount);</span>
+<span class="fc" id="L348">    InputPartitionContext&lt;InternalRow&gt;[] partitions =</span>
+<span class="fc" id="L349">        IntStream.range(0, partitionsCount)</span>
+<span class="fc" id="L350">            .mapToObj(ignored -&gt; new EmptyProjectionInputPartitionContext(partitionSize))</span>
+<span class="fc" id="L351">            .toArray(EmptyProjectionInputPartitionContext[]::new);</span>
+<span class="fc" id="L352">    int firstPartitionSize = partitionSize + (int) (rowCount % partitionsCount);</span>
+<span class="fc" id="L353">    partitions[0] = new EmptyProjectionInputPartitionContext(firstPartitionSize);</span>
+<span class="fc" id="L354">    return Stream.of(partitions);</span>
+  }
+
+  public Filter[] pushFilters(Filter[] filters) {
+<span class="fc" id="L358">    List&lt;Filter&gt; handledFilters = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L359">    List&lt;Filter&gt; unhandledFilters = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L360" title="All 2 branches covered.">    for (Filter filter : filters) {</span>
+<span class="pc bpc" id="L361" title="1 of 2 branches missed.">      if (SparkFilterUtils.isTopLevelFieldHandled(</span>
+<span class="fc" id="L362">          readSessionCreatorConfig.getPushAllFilters(),</span>
+          filter,
+<span class="fc" id="L364">          readSessionCreatorConfig.getReadDataFormat(),</span>
+          fields)) {
+<span class="fc" id="L366">        handledFilters.add(filter);</span>
+      } else {
+<span class="nc" id="L368">        unhandledFilters.add(filter);</span>
+      }
+    }
+
+<span class="fc" id="L372">    allFilters = filters;</span>
+<span class="fc" id="L373">    pushedFilters.addAll(handledFilters);</span>
+<span class="fc" id="L374">    return unhandledFilters.stream().toArray(Filter[]::new);</span>
+  }
+
+  public Filter[] pushedFilters() {
+<span class="nc" id="L378">    return pushedFilters.toArray(new Filter[0]);</span>
+  }
+
+  public Filter[] getAllFilters() {
+<span class="fc" id="L382">    return allFilters;</span>
+  }
+
+  /**
+   * Re-creates the read session and re-computes partitions for dynamic partition pruning
+   *
+   * @param filters dynamic partition pruning filters
+   * @return new planned partitions if dynamic partition pruning goes through, else returns empty
+   *     option.
+   */
+  public Optional&lt;List&lt;ArrowInputPartitionContext&gt;&gt; filter(Filter[] filters) {
+<span class="nc" id="L393">    logger.info(String.format(&quot;Use Dynamic Partition Pruning runtime filters: %s&quot;, filters));</span>
+<span class="nc bnc" id="L394" title="All 2 branches missed.">    if (plannedInputPartitionContexts == null) {</span>
+<span class="nc" id="L395">      logger.error(&quot;Should have planned partitions.&quot;);</span>
+<span class="nc" id="L396">      return Optional.empty();</span>
+    }
+
+<span class="nc" id="L399">    ImmutableList&lt;Filter&gt; newFilters =</span>
+<span class="nc" id="L400">        SparkBigQueryUtil.extractPartitionAndClusteringFilters(</span>
+<span class="nc" id="L401">            table, ImmutableList.copyOf(filters));</span>
+<span class="nc bnc" id="L402" title="All 2 branches missed.">    if (newFilters.isEmpty()) {</span>
+      // no partitioning and no clustering, this is probably a dimension table.
+      // It means the filter combined filter won't change, so no need to create another read session
+      // we are done here.
+<span class="nc" id="L406">      logger.info(</span>
+          &quot;Could not find filters for partition of clustering field for table {}, aborting DPP&quot;
+              + &quot; filter&quot;,
+<span class="nc" id="L409">          BigQueryUtil.friendlyTableName(tableId));</span>
+<span class="nc" id="L410">      return Optional.empty();</span>
+    }
+<span class="nc" id="L412">    pushedFilters.addAll(newFilters);</span>
+<span class="nc" id="L413">    Optional&lt;String&gt; combinedFilter = getCombinedFilter();</span>
+<span class="nc bnc" id="L414" title="All 2 branches missed.">    if (!BigQueryUtil.filterLengthInLimit(combinedFilter)) {</span>
+<span class="nc" id="L415">      logger.warn(</span>
+          &quot;New filter for Dynamic Partition Pruning is too large, skipping partition pruning&quot;);
+<span class="nc" id="L417">      return Optional.empty();</span>
+    }
+
+    // Copies previous planned input partition contexts.
+<span class="nc" id="L421">    List&lt;ArrowInputPartitionContext&gt; previousInputPartitionContexts = plannedInputPartitionContexts;</span>
+<span class="nc" id="L422">    resetReadSessionResponse();</span>
+    // Creates a new read session, this creates a new plannedInputPartitionContexts.
+<span class="nc" id="L424">    planBatchInputPartitionContexts();</span>
+
+<span class="nc bnc" id="L426" title="All 2 branches missed.">    if (plannedInputPartitionContexts.size() &gt; previousInputPartitionContexts.size()) {</span>
+<span class="nc" id="L427">      logger.warn(</span>
+<span class="nc" id="L428">          String.format(</span>
+              &quot;New partitions should not be more than originally planned. Previously had %d&quot;
+                  + &quot; streams, now has %d.&quot;,
+<span class="nc" id="L431">              previousInputPartitionContexts.size(), plannedInputPartitionContexts.size()));</span>
+<span class="nc" id="L432">      return Optional.of(plannedInputPartitionContexts);</span>
+    }
+<span class="nc" id="L434">    logger.info(</span>
+<span class="nc" id="L435">        String.format(</span>
+            &quot;Use Dynamic Partition Pruning, originally planned %d, adjust to %d partitions&quot;,
+<span class="nc" id="L437">            previousInputPartitionContexts.size(), plannedInputPartitionContexts.size()));</span>
+<span class="nc" id="L438">    return Optional.of(plannedInputPartitionContexts);</span>
+  }
+
+  public void pruneColumns(StructType requiredSchema) {
+    // requiredSchema may be nested column pruned, which is not supported yet.
+<span class="fc" id="L443">    this.schema =</span>
+<span class="fc" id="L444">        this.schema.map(</span>
+            prevSchema -&gt; {
+<span class="fc" id="L446">              Set&lt;String&gt; requiredCols = ImmutableSet.copyOf(requiredSchema.fieldNames());</span>
+<span class="fc" id="L447">              StructType prunedSchema = new StructType();</span>
+<span class="fc bfc" id="L448" title="All 2 branches covered.">              for (StructField field : prevSchema.fields()) {</span>
+<span class="fc bfc" id="L449" title="All 2 branches covered.">                if (requiredCols.contains(field.name())) {</span>
+<span class="fc" id="L450">                  prunedSchema = prunedSchema.add(field);</span>
+                }
+              }
+<span class="fc" id="L453">              return prunedSchema;</span>
+            });
+<span class="fc" id="L455">  }</span>
+
+  public StatisticsContext estimateStatistics() {
+<span class="fc" id="L458">    boolean isBigLakeManagedTable = BigQueryUtil.isBigLakeManagedTable(table);</span>
+<span class="fc bfc" id="L459" title="All 2 branches covered.">    if (BigQueryUtil.isBigQueryNativeTable(table)) {</span>
+      // Create StatisticsContext with information from read session response.
+      final long tableSizeInBytes;
+      final long numRowsInTable;
+<span class="fc bfc" id="L463" title="All 2 branches covered.">      if (isBuilt) {</span>
+<span class="fc" id="L464">        tableSizeInBytes =</span>
+<span class="fc" id="L465">            readSessionResponse.get().getReadSession().getEstimatedTotalBytesScanned();</span>
+<span class="fc" id="L466">        numRowsInTable = readSessionResponse.get().getReadSession().getEstimatedRowCount();</span>
+      } else {
+        // If the scan is not built, filters &amp; projections are not yet pushed. Use the fast path.
+<span class="fc" id="L469">        tableSizeInBytes = table.getNumBytes();</span>
+<span class="fc" id="L470">        numRowsInTable = table.getNumRows().longValue();</span>
+      }
+
+<span class="fc" id="L473">      StatisticsContext tableStatisticsContext =</span>
+<span class="fc" id="L474">          new StatisticsContext() {</span>
+            @Override
+            public OptionalLong sizeInBytes() {
+<span class="fc" id="L477">              return OptionalLong.of(tableSizeInBytes);</span>
+            }
+
+            @Override
+            public OptionalLong numRows() {
+<span class="nc" id="L482">              return OptionalLong.of(numRowsInTable);</span>
+            }
+          };
+
+<span class="fc" id="L486">      return tableStatisticsContext;</span>
+<span class="pc bpc" id="L487" title="1 of 4 branches missed.">    } else if (table.getDefinition().getType() == TableDefinition.Type.EXTERNAL</span>
+        || isBigLakeManagedTable) {
+<span class="fc" id="L489">      ReadSession readSession = readSessionResponse.get().getReadSession();</span>
+      // Physical file size for BigLake tables is the size of the files post file pruning and
+      // includes all fields.
+<span class="fc" id="L492">      final long tablePhysicalSizeInBytes = readSession.getEstimatedTotalPhysicalFileSize();</span>
+<span class="fc" id="L493">      final long tableRowCount = readSession.getEstimatedRowCount();</span>
+<span class="fc" id="L494">      final long originalRowSize = getRowSize(fields.values());</span>
+<span class="fc" id="L495">      final long projectedRowSize =</span>
+<span class="fc" id="L496">          schema.map(schema -&gt; getRowSize(Arrays.asList(schema.fields()))).orElse(originalRowSize);</span>
+<span class="fc" id="L497">      final long tableProjectedSizeInBytes =</span>
+          (tablePhysicalSizeInBytes * projectedRowSize) / originalRowSize;
+<span class="pc bpc" id="L499" title="1 of 2 branches missed.">      final OptionalLong sizeInBytes =</span>
+          (tableProjectedSizeInBytes == 0)
+<span class="pc" id="L501">              ? OptionalLong.empty()</span>
+<span class="fc" id="L502">              : OptionalLong.of(tableProjectedSizeInBytes);</span>
+
+<span class="fc" id="L504">      StatisticsContext tableStatisticsContext =</span>
+<span class="fc" id="L505">          new StatisticsContext() {</span>
+            @Override
+            public OptionalLong sizeInBytes() {
+<span class="fc" id="L508">              return sizeInBytes;</span>
+            }
+
+            @Override
+            public OptionalLong numRows() {
+              // Number of rows are only available for BigLake Managed tables.
+<span class="nc bnc" id="L514" title="All 2 branches missed.">              return isBigLakeManagedTable ? OptionalLong.of(tableRowCount) : OptionalLong.empty();</span>
+            }
+          };
+<span class="fc" id="L517">      return tableStatisticsContext;</span>
+    } else {
+<span class="fc" id="L519">      return UNKNOWN_STATISTICS;</span>
+    }
+  }
+
+  public String getTableName() {
+<span class="nc" id="L524">    return tableId.getTable();</span>
+  }
+
+  public String getFullTableName() {
+<span class="fc" id="L528">    return BigQueryUtil.friendlyTableName(tableId);</span>
+  }
+
+  public TableId getTableId() {
+<span class="fc" id="L532">    return tableId;</span>
+  }
+
+  public BigQueryRDDFactory getBigQueryRddFactory() {
+<span class="nc" id="L536">    return this.bigQueryRDDFactory;</span>
+  }
+
+  public TableInfo getTableInfo() {
+<span class="fc" id="L540">    return this.table;</span>
+  }
+
+  public void build() {
+    // Supplier provided by Suppliers.memoize is thread-safe
+<span class="fc" id="L545">    asyncReadSessionExecutor.submit(() -&gt; readSessionResponse.get());</span>
+<span class="fc" id="L546">    asyncReadSessionExecutor.shutdown();</span>
+<span class="fc" id="L547">    isBuilt = true;</span>
+<span class="fc" id="L548">  }</span>
+
+  /**
+   * This logic is taken from Spark's {@link
+   * org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUtils ::getSizePerRow }
+   */
+  private long getRowSize(Collection&lt;StructField&gt; fields) {
+    // There should be some overhead in Row object, the size should not be zero when there are
+    // no columns, this helps to prevent divide-by-zero error.
+<span class="fc" id="L557">    return 8</span>
+<span class="fc" id="L558">        + fields.stream()</span>
+<span class="fc" id="L559">            .map(structField -&gt; (long) structField.dataType().defaultSize())</span>
+<span class="fc" id="L560">            .reduce(0L, Long::sum);</span>
+  }
+
+  public String getReadSessionId() {
+<span class="fc bfc" id="L564" title="All 2 branches covered.">    if (readSessionResponse.isInitialized()) {</span>
+<span class="fc" id="L565">      return readSessionResponse.get().getReadSession().getName();</span>
+    }
+<span class="fc" id="L567">    return &quot;N/A&quot;;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

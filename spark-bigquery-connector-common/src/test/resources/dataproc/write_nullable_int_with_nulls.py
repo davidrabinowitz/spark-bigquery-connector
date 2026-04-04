@@ -1,0 +1,38 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.types import *
+import argparse
+import json
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--table", required=True)
+    parser.add_argument("--bucket", required=True)
+    parser.add_argument("--mode", default="append")
+    parser.add_argument("--method", default="direct")
+    parser.add_argument("--format", default="parquet")
+    parser.add_argument("--write_at_least_once", default="false")
+    parser.add_argument("--kms_key")
+    
+    args = parser.parse_args()
+    spark = SparkSession.builder.appName("WriteNullableIntWithNulls").getOrCreate()
+    
+    schema = StructType([StructField("int_null", IntegerType(), True)])
+    data = [(25,), (None,)]
+    df = spark.createDataFrame(data, schema)
+    
+    writer = df.write.format("bigquery") \
+        .mode(args.mode) \
+        .option("table", args.table) \
+        .option("temporaryGcsBucket", args.bucket) \
+        .option("intermediateFormat", args.format) \
+        .option("writeMethod", args.method) \
+        .option("writeAtLeastOnce", args.write_at_least_once)
+    
+    if args.kms_key:
+        writer = writer.option("destinationTableKmsKeyName", args.kms_key)
+        
+    writer.save()
+    
+    print("===BEGIN OUTPUT===")
+    print(json.dumps({"status": "success"}))
+    print("===END OUTPUT===")

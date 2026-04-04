@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>TimestampNTZTypeConverter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-3.4-bigquery-lib</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.v2</a> &gt; <span class="el_source">TimestampNTZTypeConverter.java</span></div><h1>TimestampNTZTypeConverter.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2023 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.v2;
+
+import com.google.cloud.bigquery.LegacySQLTypeName;
+import com.google.cloud.bigquery.StandardSQLTypeName;
+import com.google.cloud.bigquery.storage.v1.CivilTimeEncoder;
+import com.google.cloud.spark.bigquery.TypeConverter;
+import com.google.protobuf.DescriptorProtos;
+import org.apache.spark.sql.types.DataType;
+import org.apache.spark.sql.types.DataTypes;
+
+<span class="fc" id="L26">public class TimestampNTZTypeConverter implements TypeConverter&lt;Long&gt; {</span>
+  @Override
+  public DataType toSparkType(LegacySQLTypeName bigQueryType) {
+<span class="pc bpc" id="L29" title="1 of 2 branches missed.">    if (supportsBigQueryType(bigQueryType)) {</span>
+<span class="fc" id="L30">      return DataTypes.TimestampNTZType;</span>
+    }
+<span class="nc" id="L32">    throw new IllegalArgumentException(&quot;Data type not supported : &quot; + bigQueryType);</span>
+  }
+
+  @Override
+  public LegacySQLTypeName toBigQueryType(DataType sparkType) {
+<span class="pc bpc" id="L37" title="1 of 2 branches missed.">    if (supportsSparkType(sparkType)) {</span>
+<span class="fc" id="L38">      return LegacySQLTypeName.DATETIME;</span>
+    }
+<span class="nc" id="L40">    throw new IllegalArgumentException(&quot;Data type not supported : &quot; + sparkType);</span>
+  }
+
+  @Override
+  public DescriptorProtos.FieldDescriptorProto.Type toProtoFieldType(DataType sparkType) {
+<span class="pc bpc" id="L45" title="1 of 2 branches missed.">    if (supportsSparkType(sparkType)) {</span>
+<span class="fc" id="L46">      return DescriptorProtos.FieldDescriptorProto.Type.TYPE_INT64;</span>
+    }
+<span class="nc" id="L48">    throw new IllegalArgumentException(&quot;Data type not supported : &quot; + sparkType);</span>
+  }
+
+  @Override
+  public boolean supportsBigQueryType(LegacySQLTypeName bigQueryType) {
+<span class="fc" id="L53">    return bigQueryType.getStandardType().equals(StandardSQLTypeName.DATETIME);</span>
+  }
+
+  @Override
+  public boolean supportsSparkType(DataType sparkType) {
+<span class="fc" id="L58">    return sparkType.sameType(DataTypes.TimestampNTZType);</span>
+  }
+
+  @Override
+  public Long sparkToProtoValue(Object sparkValue) {
+<span class="fc" id="L63">    java.time.LocalDateTime javaLocalTime = (java.time.LocalDateTime) sparkValue;</span>
+
+<span class="fc" id="L65">    org.threeten.bp.LocalDateTime threeTenLocalTime =</span>
+<span class="fc" id="L66">        org.threeten.bp.LocalDateTime.of(</span>
+<span class="fc" id="L67">            javaLocalTime.getYear(),</span>
+<span class="fc" id="L68">            javaLocalTime.getMonthValue(),</span>
+<span class="fc" id="L69">            javaLocalTime.getDayOfMonth(),</span>
+<span class="fc" id="L70">            javaLocalTime.getHour(),</span>
+<span class="fc" id="L71">            javaLocalTime.getMinute(),</span>
+<span class="fc" id="L72">            javaLocalTime.getSecond(),</span>
+<span class="fc" id="L73">            javaLocalTime.getNano());</span>
+<span class="fc" id="L74">    return CivilTimeEncoder.encodePacked64DatetimeMicros(threeTenLocalTime);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

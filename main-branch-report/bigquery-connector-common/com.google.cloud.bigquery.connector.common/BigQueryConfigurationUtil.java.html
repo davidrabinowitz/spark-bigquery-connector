@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryConfigurationUtil.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryConfigurationUtil.java</span></div><h1>BigQueryConfigurationUtil.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.firstPresent;
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.parseTableId;
+import static java.lang.String.format;
+
+import com.google.cloud.bigquery.BigQueryOptions;
+import com.google.cloud.bigquery.TableId;
+import com.google.common.base.Optional;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+
+/** Utilities to read configuration options */
+public class BigQueryConfigurationUtil {
+
+<span class="fc" id="L35">  public static final Supplier&lt;com.google.common.base.Optional&lt;String&gt;&gt; DEFAULT_FALLBACK =</span>
+<span class="fc" id="L36">      () -&gt; empty();</span>
+
+  private BigQueryConfigurationUtil() {}
+
+  public static com.google.common.base.Supplier&lt;String&gt; defaultBilledProject() {
+<span class="fc" id="L41">    return () -&gt; BigQueryOptions.getDefaultInstance().getProjectId();</span>
+  }
+
+  public static String getRequiredOption(Map&lt;String, String&gt; options, String name) {
+<span class="nc" id="L45">    return getOption(options, name, DEFAULT_FALLBACK)</span>
+<span class="nc" id="L46">        .toJavaUtil()</span>
+<span class="nc" id="L47">        .orElseThrow(() -&gt; new IllegalArgumentException(format(&quot;Option %s required.&quot;, name)));</span>
+  }
+
+  public static String getRequiredOption(
+      Map&lt;String, String&gt; options, String name, com.google.common.base.Supplier&lt;String&gt; fallback) {
+<span class="fc" id="L52">    return getOption(options, name, DEFAULT_FALLBACK).or(fallback);</span>
+  }
+
+  public static com.google.common.base.Optional&lt;String&gt; getOption(
+      Map&lt;String, String&gt; options, String name) {
+<span class="fc" id="L57">    return getOption(options, name, DEFAULT_FALLBACK);</span>
+  }
+
+  public static com.google.common.base.Optional&lt;String&gt; getOption(
+      Map&lt;String, String&gt; options, String name, Supplier&lt;Optional&lt;String&gt;&gt; fallback) {
+<span class="fc" id="L62">    return fromJavaUtil(</span>
+<span class="fc" id="L63">        firstPresent(</span>
+<span class="fc" id="L64">            java.util.Optional.ofNullable(options.get(name.toLowerCase())),</span>
+<span class="fc" id="L65">            fallback.get().toJavaUtil()));</span>
+  }
+
+  public static com.google.common.base.Optional&lt;String&gt; getOptionFromMultipleParams(
+      Map&lt;String, String&gt; options,
+      Collection&lt;String&gt; names,
+      Supplier&lt;com.google.common.base.Optional&lt;String&gt;&gt; fallback) {
+<span class="fc" id="L72">    return names.stream()</span>
+<span class="fc" id="L73">        .map(name -&gt; getOption(options, name))</span>
+<span class="fc" id="L74">        .filter(com.google.common.base.Optional::isPresent)</span>
+<span class="fc" id="L75">        .findFirst()</span>
+<span class="fc" id="L76">        .orElseGet(fallback);</span>
+  }
+
+  public static Map&lt;String, String&gt; getMapEntriesWithPrefix(
+      Map&lt;String, String&gt; map, String prefix) {
+<span class="fc" id="L81">    Map&lt;String, String&gt; result = new HashMap();</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">    for (Map.Entry&lt;String, String&gt; entry : map.entrySet()) {</span>
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">      if (entry.getKey().startsWith(prefix)) {</span>
+<span class="nc" id="L84">        result.put(entry.getKey(), entry.getValue());</span>
+      }
+<span class="fc" id="L86">    }</span>
+<span class="fc" id="L87">    return result;</span>
+  }
+
+  public static com.google.common.base.Optional&lt;Map&lt;String, String&gt;&gt; removePrefixFromMapKeys(
+      com.google.common.base.Optional&lt;Map&lt;String, String&gt;&gt; map, String prefix) {
+<span class="fc" id="L92">    Map&lt;String, String&gt; modifiedMap = new HashMap&lt;&gt;();</span>
+<span class="pc bpc" id="L93" title="1 of 2 branches missed.">    if (map.isPresent()) {</span>
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">      for (Map.Entry&lt;String, String&gt; entry : map.get().entrySet()) {</span>
+<span class="nc" id="L95">        String originalKey = entry.getKey();</span>
+<span class="nc" id="L96">        String modifiedKey =</span>
+<span class="nc bnc" id="L97" title="All 2 branches missed.">            originalKey.startsWith(prefix) ? originalKey.substring(prefix.length()) : originalKey;</span>
+<span class="nc" id="L98">        modifiedMap.put(modifiedKey, entry.getValue());</span>
+<span class="nc" id="L99">      }</span>
+    }
+<span class="fc" id="L101">    return com.google.common.base.Optional.of(modifiedMap);</span>
+  }
+
+  public static com.google.common.base.Optional&lt;Map&lt;String, String&gt;&gt; getAnyOptionsWithPrefix(
+      ImmutableMap&lt;String, String&gt; globalOptions, Map&lt;String, String&gt; options, String prefix) {
+<span class="fc" id="L106">    Map&lt;String, String&gt; result = getMapEntriesWithPrefix(globalOptions, prefix);</span>
+<span class="fc" id="L107">    Map&lt;String, String&gt; prefixOptions = getMapEntriesWithPrefix(options, prefix);</span>
+<span class="fc" id="L108">    result.putAll(prefixOptions);</span>
+<span class="fc" id="L109">    return com.google.common.base.Optional.of(result);</span>
+  }
+
+  public static com.google.common.base.Optional&lt;String&gt; getAnyOption(
+      ImmutableMap&lt;String, String&gt; globalOptions, Map&lt;String, String&gt; options, String name) {
+<span class="fc" id="L114">    return com.google.common.base.Optional.fromNullable(options.get(name.toLowerCase()))</span>
+<span class="fc" id="L115">        .or(com.google.common.base.Optional.fromNullable(globalOptions.get(name)));</span>
+  }
+
+  // gives the option to support old configurations as fallback
+  // Used to provide backward compatibility
+  public static com.google.common.base.Optional&lt;String&gt; getAnyOption(
+      ImmutableMap&lt;String, String&gt; globalOptions,
+      Map&lt;String, String&gt; options,
+      Collection&lt;String&gt; names) {
+<span class="fc" id="L124">    return names.stream()</span>
+<span class="fc" id="L125">        .map(name -&gt; getAnyOption(globalOptions, options, name))</span>
+<span class="fc" id="L126">        .filter(optional -&gt; optional.isPresent())</span>
+<span class="fc" id="L127">        .findFirst()</span>
+<span class="fc" id="L128">        .orElse(empty());</span>
+  }
+
+  public static boolean getAnyBooleanOption(
+      ImmutableMap&lt;String, String&gt; globalOptions,
+      Map&lt;String, String&gt; options,
+      String name,
+      boolean defaultValue) {
+<span class="fc" id="L136">    return getAnyOption(globalOptions, options, name).transform(Boolean::valueOf).or(defaultValue);</span>
+  }
+
+  public static com.google.common.base.Optional empty() {
+<span class="fc" id="L140">    return com.google.common.base.Optional.absent();</span>
+  }
+
+  public static com.google.common.base.Optional fromJavaUtil(java.util.Optional o) {
+<span class="fc" id="L144">    return com.google.common.base.Optional.fromJavaUtil(o);</span>
+  }
+
+  /** TableId that does not include partition decorator */
+  public static TableId parseSimpleTableId(
+      Map&lt;String, String&gt; options,
+      Optional&lt;String&gt; fallbackProject,
+      Optional&lt;String&gt; fallbackDataset) {
+<span class="nc" id="L152">    String tableParam =</span>
+<span class="nc" id="L153">        getOptionFromMultipleParams(options, ImmutableList.of(&quot;table&quot;, &quot;path&quot;), DEFAULT_FALLBACK)</span>
+<span class="nc" id="L154">            .get();</span>
+<span class="nc" id="L155">    Optional&lt;String&gt; datasetParam = getOption(options, &quot;dataset&quot;).or(fallbackDataset);</span>
+<span class="nc" id="L156">    Optional&lt;String&gt; projectParam = getOption(options, &quot;project&quot;).or(fallbackProject);</span>
+<span class="nc" id="L157">    return parseTableId(</span>
+        tableParam,
+<span class="nc" id="L159">        datasetParam.toJavaUtil(),</span>
+<span class="nc" id="L160">        projectParam.toJavaUtil(), /* datePartition */</span>
+<span class="nc" id="L161">        java.util.Optional.empty());</span>
+  }
+
+  public static TableId parseSimpleTableId(
+      Map&lt;String, String&gt; options,
+      java.util.Optional&lt;String&gt; fallbackProject,
+      java.util.Optional&lt;String&gt; fallbackDataset) {
+<span class="nc" id="L168">    return parseSimpleTableId(</span>
+<span class="nc" id="L169">        options, Optional.fromJavaUtil(fallbackProject), Optional.fromJavaUtil(fallbackDataset));</span>
+  }
+
+  public static TableId parseSimpleTableId(
+      ImmutableMap&lt;String, String&gt; globalOptions, Map&lt;String, String&gt; options) {
+<span class="nc" id="L174">    MaterializationConfiguration materializationConfiguration =</span>
+<span class="nc" id="L175">        MaterializationConfiguration.from(globalOptions, options);</span>
+<span class="nc" id="L176">    return parseSimpleTableId(</span>
+        options,
+<span class="nc" id="L178">        materializationConfiguration.getMaterializationProject(),</span>
+<span class="nc" id="L179">        materializationConfiguration.getMaterializationDataset());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

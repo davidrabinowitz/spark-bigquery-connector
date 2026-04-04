@@ -1,0 +1,1314 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryClient.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryClient.java</span></div><h1>BigQueryClient.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.getPartitionFields;
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.getQueryForRangePartitionedTable;
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.getQueryForTimePartitionedTable;
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.isBigQueryNativeTable;
+
+import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.services.bigquery.Bigquery;
+import com.google.auth.http.HttpCredentialsAdapter;
+import com.google.cloud.BaseServiceException;
+import com.google.cloud.RetryOption;
+import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.BigQueryException;
+import com.google.cloud.bigquery.Clustering;
+import com.google.cloud.bigquery.Dataset;
+import com.google.cloud.bigquery.DatasetId;
+import com.google.cloud.bigquery.DatasetInfo;
+import com.google.cloud.bigquery.EncryptionConfiguration;
+import com.google.cloud.bigquery.FormatOptions;
+import com.google.cloud.bigquery.Job;
+import com.google.cloud.bigquery.JobConfiguration;
+import com.google.cloud.bigquery.JobId;
+import com.google.cloud.bigquery.JobInfo;
+import com.google.cloud.bigquery.JobStatistics;
+import com.google.cloud.bigquery.LoadJobConfiguration;
+import com.google.cloud.bigquery.QueryJobConfiguration;
+import com.google.cloud.bigquery.QueryJobConfiguration.Priority;
+import com.google.cloud.bigquery.RangePartitioning;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.StandardTableDefinition;
+import com.google.cloud.bigquery.Table;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.TableResult;
+import com.google.cloud.bigquery.TimePartitioning;
+import com.google.cloud.http.BaseHttpServiceException;
+import com.google.common.base.Preconditions;
+import com.google.common.cache.Cache;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.threeten.bp.Duration;
+
+// holds caches and mappings
+// presto converts the dataset and table names to lower case, while BigQuery is case sensitive
+// the mappings here keep the mappings
+public class BigQueryClient {
+<span class="fc" id="L86">  private static final Logger log = LoggerFactory.getLogger(BigQueryClient.class);</span>
+
+<span class="fc" id="L88">  private static final List&lt;Runnable&gt; CLEANUP_JOBS = new ArrayList&lt;&gt;();</span>
+
+  private final BigQuery bigQuery;
+  // The rest client is generated directly from the API, and therefore returns more metadata than
+  // the
+  // google-cloud-bigquery client above,
+  private final Bigquery bigqueryRestClient;
+  private final Cache&lt;String, TableInfo&gt; destinationTableCache;
+  private final Optional&lt;String&gt; materializationProject;
+  private final Optional&lt;String&gt; materializationDataset;
+  private final JobConfigurationFactory jobConfigurationFactory;
+  private final Optional&lt;BigQueryJobCompletionListener&gt; jobCompletionListener;
+  private final long bigQueryJobTimeoutInMinutes;
+
+  public BigQueryClient(
+      BigQuery bigQuery,
+      Optional&lt;String&gt; materializationProject,
+      Optional&lt;String&gt; materializationDataset,
+      Cache&lt;String, TableInfo&gt; destinationTableCache,
+      Map&lt;String, String&gt; labels,
+      Priority queryJobPriority,
+      Optional&lt;BigQueryJobCompletionListener&gt; jobCompletionListener,
+<span class="fc" id="L110">      long bigQueryJobTimeoutInMinutes) {</span>
+<span class="fc" id="L111">    this.bigQuery = bigQuery;</span>
+<span class="fc" id="L112">    this.bigqueryRestClient = createRestClient(bigQuery);</span>
+<span class="fc" id="L113">    this.materializationProject = materializationProject;</span>
+<span class="fc" id="L114">    this.materializationDataset = materializationDataset;</span>
+<span class="fc" id="L115">    this.destinationTableCache = destinationTableCache;</span>
+<span class="fc" id="L116">    this.jobConfigurationFactory = new JobConfigurationFactory(labels, queryJobPriority);</span>
+<span class="fc" id="L117">    this.jobCompletionListener = jobCompletionListener;</span>
+<span class="fc" id="L118">    this.bigQueryJobTimeoutInMinutes = bigQueryJobTimeoutInMinutes;</span>
+<span class="fc" id="L119">  }</span>
+
+  static Bigquery createRestClient(BigQuery bigQuery) {
+    try {
+      // Initialize client that will be used to send requests. This client only needs to be created
+      // once, and can be reused for multiple requests
+<span class="fc" id="L125">      HttpCredentialsAdapter httpCredentialsAdapter =</span>
+<span class="fc" id="L126">          new HttpCredentialsAdapter(bigQuery.getOptions().getCredentials());</span>
+<span class="fc" id="L127">      Bigquery.Builder client =</span>
+          new Bigquery.Builder(
+<span class="fc" id="L129">                  GoogleNetHttpTransport.newTrustedTransport(),</span>
+<span class="fc" id="L130">                  GsonFactory.getDefaultInstance(),</span>
+                  httpRequest -&gt; {
+<span class="nc" id="L132">                    httpCredentialsAdapter.initialize(httpRequest);</span>
+<span class="nc" id="L133">                    httpRequest.setThrowExceptionOnExecuteError(false);</span>
+<span class="nc" id="L134">                  })</span>
+<span class="fc" id="L135">              .setApplicationName(bigQuery.getOptions().getUserAgent());</span>
+<span class="fc" id="L136">      return client.build();</span>
+<span class="nc" id="L137">    } catch (GeneralSecurityException gse) {</span>
+<span class="nc" id="L138">      throw new BigQueryConnectorException(</span>
+          &quot;Failed to create new trusted transport for BigQuery REST client&quot;, gse);
+<span class="nc" id="L140">    } catch (IOException ioe) {</span>
+<span class="nc" id="L141">      throw new UncheckedIOException(ioe);</span>
+    }
+  }
+
+  public static synchronized void runCleanupJobs() {
+<span class="nc" id="L146">    log.info(&quot;Running cleanup jobs. Jobs count is &quot; + CLEANUP_JOBS.size());</span>
+<span class="nc bnc" id="L147" title="All 2 branches missed.">    for (Runnable job : CLEANUP_JOBS) {</span>
+      try {
+<span class="nc" id="L149">        job.run();</span>
+<span class="nc" id="L150">      } catch (Exception e) {</span>
+<span class="nc" id="L151">        log.warn(</span>
+            &quot;Caught exception while running cleanup job. Continue to run the rest of the jobs&quot;, e);
+<span class="nc" id="L153">      }</span>
+<span class="nc" id="L154">    }</span>
+<span class="nc" id="L155">    log.info(&quot;Clearing the cleanup jobs list&quot;);</span>
+<span class="nc" id="L156">    CLEANUP_JOBS.clear();</span>
+<span class="nc" id="L157">    log.info(&quot;Finished to run cleanup jobs.&quot;);</span>
+<span class="nc" id="L158">  }</span>
+
+  /**
+   * Waits for a BigQuery Job to complete: this is a blocking function.
+   *
+   * @param job The {@code Job} to keep track of.
+   */
+  public JobInfo waitForJob(Job job) {
+    try {
+<span class="fc" id="L167">      Job completedJob =</span>
+<span class="fc" id="L168">          job.waitFor(</span>
+<span class="fc" id="L169">              RetryOption.initialRetryDelay(Duration.ofSeconds(1)),</span>
+<span class="fc" id="L170">              RetryOption.totalTimeout(Duration.ofMinutes(bigQueryJobTimeoutInMinutes)));</span>
+<span class="pc bpc" id="L171" title="2 of 4 branches missed.">      if (completedJob == null || completedJob.getStatus().getError() != null) {</span>
+<span class="nc bnc" id="L172" title="All 2 branches missed.">        throw new UncheckedIOException(</span>
+            new IOException(
+<span class="nc" id="L174">                completedJob != null ? completedJob.getStatus().getError().toString() : null));</span>
+      }
+<span class="fc bfc" id="L176" title="All 2 branches covered.">      if (!completedJob.isDone()) {</span>
+<span class="fc" id="L177">        completedJob.cancel();</span>
+<span class="fc" id="L178">        throw new IllegalStateException(</span>
+<span class="fc" id="L179">            String.format(&quot;Job aborted due to timeout  : %s minutes&quot;, bigQueryJobTimeoutInMinutes));</span>
+      }
+<span class="fc" id="L181">      jobCompletionListener.ifPresent(jcl -&gt; jcl.accept(completedJob));</span>
+<span class="fc" id="L182">      return completedJob;</span>
+<span class="nc" id="L183">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L184">      throw new RuntimeException(</span>
+          &quot;Could not copy table from temporary sink to destination table.&quot;, e);
+    }
+  }
+
+  // return empty if no filters are used
+  private static Optional&lt;String&gt; createWhereClause(String[] filters) {
+<span class="fc bfc" id="L191" title="All 2 branches covered.">    if (filters.length == 0) {</span>
+<span class="fc" id="L192">      return Optional.empty();</span>
+    }
+<span class="fc" id="L194">    return Optional.of(Stream.of(filters).collect(Collectors.joining(&quot;) AND (&quot;, &quot;(&quot;, &quot;)&quot;)));</span>
+  }
+
+  public TableInfo getTable(TableId tableId) {
+<span class="fc" id="L198">    return bigQuery.getTable(tableId);</span>
+  }
+
+  /**
+   * Checks whether the requested table exists in BigQuery.
+   *
+   * @param tableId The TableId of the requested table in BigQuery
+   * @return True if the requested table exists in BigQuery, false otherwise.
+   */
+  public boolean tableExists(TableId tableId) {
+<span class="fc bfc" id="L208" title="All 2 branches covered.">    return getTable(tableId) != null;</span>
+  }
+
+  /**
+   * Creates an empty table in BigQuery.
+   *
+   * @param tableId The TableId of the table to be created.
+   * @param schema The Schema of the table to be created.
+   * @return The {@code Table} object representing the table that was created.
+   *     &lt;p&gt;public TableInfo createTable(TableId tableId, Schema schema) { return
+   *     createTable(tableId, schema, Optional.empty()); }
+   */
+
+  /**
+   * Creates an empty table in BigQuery.
+   *
+   * @param tableId The TableId of the table to be created.
+   * @param schema The Schema of the table to be created.
+   * @param options Allows configuring the created table
+   * @return The {@code Table} object representing the table that was created.
+   */
+  public TableInfo createTable(TableId tableId, Schema schema, CreateTableOptions options) {
+
+    StandardTableDefinition.Builder tableDefinition =
+<span class="fc" id="L232">        StandardTableDefinition.newBuilder().setSchema(schema);</span>
+
+<span class="fc" id="L234">    options</span>
+<span class="fc" id="L235">        .getClusteredFields()</span>
+<span class="fc" id="L236">        .ifPresent(</span>
+            clusteredFields -&gt;
+<span class="fc" id="L238">                tableDefinition.setClustering(</span>
+<span class="fc" id="L239">                    Clustering.newBuilder().setFields(clusteredFields).build()));</span>
+
+<span class="fc" id="L241">    TableInfo.Builder tableInfo = TableInfo.newBuilder(tableId, tableDefinition.build());</span>
+<span class="fc" id="L242">    options</span>
+<span class="fc" id="L243">        .getKmsKeyName()</span>
+<span class="fc" id="L244">        .ifPresent(</span>
+            keyName -&gt;
+<span class="fc" id="L246">                tableInfo.setEncryptionConfiguration(</span>
+<span class="fc" id="L247">                    EncryptionConfiguration.newBuilder().setKmsKeyName(keyName).build()));</span>
+<span class="fc bfc" id="L248" title="All 2 branches covered.">    if (!options.getBigQueryTableLabels().isEmpty()) {</span>
+<span class="fc" id="L249">      tableInfo.setLabels(options.getBigQueryTableLabels());</span>
+    }
+<span class="fc" id="L251">    return bigQuery.create(tableInfo.build());</span>
+  }
+
+  /**
+   * Creates a temporary table with a job to cleanup after application end, and the same location as
+   * the destination table; the temporary table will have the same name as the destination table,
+   * with the current time in milliseconds appended to it; useful for holding temporary data in
+   * order to overwrite the destination table.
+   *
+   * @param destinationTableId The TableId of the eventual destination for the data going into the
+   *     temporary table.
+   * @param schema The Schema of the destination / temporary table.
+   * @return The {@code Table} object representing the created temporary table.
+   */
+  public TableInfo createTempTable(TableId destinationTableId, Schema schema) {
+<span class="fc" id="L266">    TableId tempTableId = createTempTableId(destinationTableId);</span>
+<span class="fc" id="L267">    TableInfo tableInfo =</span>
+<span class="fc" id="L268">        TableInfo.newBuilder(tempTableId, StandardTableDefinition.of(schema)).build();</span>
+<span class="fc" id="L269">    TableInfo tempTable = bigQuery.create(tableInfo);</span>
+<span class="pc" id="L270">    CLEANUP_JOBS.add(() -&gt; deleteTable(tempTable.getTableId()));</span>
+<span class="fc" id="L271">    return tempTable;</span>
+  }
+
+  public TableInfo createTempTableAfterCheckingSchema(
+      TableId destinationTableId, Schema schema, boolean enableModeCheckForSchemaFields)
+      throws IllegalArgumentException {
+<span class="fc" id="L277">    TableInfo destinationTable = getTable(destinationTableId);</span>
+<span class="fc" id="L278">    Schema tableSchema = destinationTable.getDefinition().getSchema();</span>
+<span class="fc" id="L279">    ComparisonResult schemaWritableResult =</span>
+<span class="fc" id="L280">        BigQueryUtil.schemaWritable(</span>
+            schema, // sourceSchema
+            tableSchema, // destinationSchema
+            false, // regardFieldOrder
+            enableModeCheckForSchemaFields);
+<span class="fc" id="L285">    Preconditions.checkArgument(</span>
+<span class="fc" id="L286">        schemaWritableResult.valuesAreEqual(),</span>
+        new BigQueryConnectorException.InvalidSchemaException(
+            &quot;Destination table's schema is not compatible with dataframe's schema. &quot;
+<span class="fc" id="L289">                + schemaWritableResult.makeMessage()));</span>
+<span class="fc" id="L290">    return createTempTable(destinationTableId, schema);</span>
+  }
+
+  public TableId createTempTableId(TableId destinationTableId) {
+<span class="fc" id="L294">    String tempProject = materializationProject.orElseGet(destinationTableId::getProject);</span>
+<span class="fc" id="L295">    String tempDataset = materializationDataset.orElseGet(destinationTableId::getDataset);</span>
+<span class="fc" id="L296">    String tableName = destinationTableId.getTable() + System.nanoTime();</span>
+<span class="pc bpc" id="L297" title="1 of 2 branches missed.">    TableId tempTableId =</span>
+        tempProject == null
+<span class="pc" id="L299">            ? TableId.of(tempDataset, tableName)</span>
+<span class="pc" id="L300">            : TableId.of(tempProject, tempDataset, tableName);</span>
+<span class="fc" id="L301">    return tempTableId;</span>
+  }
+
+  /**
+   * Deletes this table in BigQuery.
+   *
+   * @param tableId The TableId of the table to be deleted.
+   * @return True if the operation was successful, false otherwise.
+   */
+  public boolean deleteTable(TableId tableId) {
+<span class="fc" id="L311">    log.info(&quot;Deleting table &quot; + fullTableName(tableId));</span>
+<span class="fc" id="L312">    return bigQuery.delete(tableId);</span>
+  }
+
+  private Job copyData(
+      TableId sourceTableId,
+      TableId destinationTableId,
+      JobInfo.WriteDisposition writeDisposition) {
+<span class="fc" id="L319">    String queryFormat = &quot;SELECT * FROM `%s`&quot;;</span>
+<span class="fc" id="L320">    String temporaryTableName = fullTableName(sourceTableId);</span>
+<span class="fc" id="L321">    String sqlQuery = String.format(queryFormat, temporaryTableName);</span>
+<span class="fc" id="L322">    QueryJobConfiguration queryConfig =</span>
+        jobConfigurationFactory
+<span class="fc" id="L324">            .createQueryJobConfigurationBuilder(sqlQuery, Collections.emptyMap())</span>
+<span class="fc" id="L325">            .setUseLegacySql(false)</span>
+<span class="fc" id="L326">            .setDestinationTable(destinationTableId)</span>
+<span class="fc" id="L327">            .setWriteDisposition(writeDisposition)</span>
+<span class="fc" id="L328">            .build();</span>
+
+<span class="fc" id="L330">    return create(JobInfo.newBuilder(queryConfig).build());</span>
+  }
+
+  public boolean isTablePartitioned(TableId tableId) {
+<span class="fc" id="L334">    TableInfo table = getTable(tableId);</span>
+<span class="pc bpc" id="L335" title="1 of 2 branches missed.">    if (table == null) {</span>
+<span class="nc" id="L336">      return false;</span>
+    }
+<span class="fc" id="L338">    TableDefinition tableDefinition = table.getDefinition();</span>
+<span class="pc bpc" id="L339" title="1 of 2 branches missed.">    if (tableDefinition instanceof StandardTableDefinition) {</span>
+<span class="fc" id="L340">      StandardTableDefinition sdt = (StandardTableDefinition) tableDefinition;</span>
+<span class="fc bfc" id="L341" title="All 4 branches covered.">      return sdt.getTimePartitioning() != null || sdt.getRangePartitioning() != null;</span>
+    }
+<span class="nc" id="L343">    return false;</span>
+  }
+
+  /**
+   * Overwrites the partitions of the destination table, using the partitions from the given
+   * temporary table, transactionally.
+   *
+   * @param temporaryTableId The {@code TableId} representing the temporary-table.
+   * @param destinationTableId The {@code TableId} representing the destination table.
+   * @return The {@code Job} object representing this operation (which can be tracked to wait until
+   *     it has finished successfully).
+   */
+  public Job overwriteDestinationWithTemporaryDynamicPartitons(
+      TableId temporaryTableId, TableId destinationTableId) {
+
+<span class="fc" id="L358">    TableDefinition destinationDefinition = getTable(destinationTableId).getDefinition();</span>
+<span class="fc" id="L359">    String sqlQuery = null;</span>
+<span class="pc bpc" id="L360" title="1 of 2 branches missed.">    if (destinationDefinition instanceof StandardTableDefinition) {</span>
+<span class="fc" id="L361">      String destinationTableName = fullTableName(destinationTableId);</span>
+<span class="fc" id="L362">      String temporaryTableName = fullTableName(temporaryTableId);</span>
+<span class="fc" id="L363">      StandardTableDefinition sdt = (StandardTableDefinition) destinationDefinition;</span>
+
+<span class="fc" id="L365">      TimePartitioning timePartitioning = sdt.getTimePartitioning();</span>
+<span class="fc bfc" id="L366" title="All 2 branches covered.">      if (timePartitioning != null) {</span>
+<span class="fc" id="L367">        sqlQuery =</span>
+<span class="fc" id="L368">            getQueryForTimePartitionedTable(</span>
+                destinationTableName, temporaryTableName, sdt, timePartitioning);
+      } else {
+<span class="fc" id="L371">        RangePartitioning rangePartitioning = sdt.getRangePartitioning();</span>
+<span class="fc bfc" id="L372" title="All 2 branches covered.">        if (rangePartitioning != null) {</span>
+<span class="fc" id="L373">          sqlQuery =</span>
+<span class="fc" id="L374">              getQueryForRangePartitionedTable(</span>
+                  destinationTableName, temporaryTableName, sdt, rangePartitioning);
+        }
+      }
+
+<span class="fc bfc" id="L379" title="All 2 branches covered.">      if (sqlQuery != null) {</span>
+<span class="fc" id="L380">        QueryJobConfiguration queryConfig =</span>
+            jobConfigurationFactory
+<span class="fc" id="L382">                .createQueryJobConfigurationBuilder(sqlQuery, Collections.emptyMap())</span>
+<span class="fc" id="L383">                .setUseLegacySql(false)</span>
+<span class="fc" id="L384">                .build();</span>
+
+<span class="fc" id="L386">        return create(JobInfo.newBuilder(queryConfig).build());</span>
+      }
+    }
+
+    // no partitioning default to statndard overwrite
+<span class="fc" id="L391">    return overwriteDestinationWithTemporary(temporaryTableId, destinationTableId);</span>
+  }
+
+  /**
+   * Overwrites the given destination table, with all the data from the given temporary table,
+   * transactionally.
+   *
+   * @param temporaryTableId The {@code TableId} representing the temporary-table.
+   * @param destinationTableId The {@code TableId} representing the destination table.
+   * @return The {@code Job} object representing this operation (which can be tracked to wait until
+   *     it has finished successfully).
+   */
+  public Job overwriteDestinationWithTemporary(
+      TableId temporaryTableId, TableId destinationTableId) {
+<span class="fc" id="L405">    String queryFormat =</span>
+        &quot;MERGE `%s`\n&quot;
+            + &quot;USING (SELECT * FROM `%s`)\n&quot;
+            + &quot;ON FALSE\n&quot;
+            + &quot;WHEN NOT MATCHED THEN INSERT ROW\n&quot;
+            + &quot;WHEN NOT MATCHED BY SOURCE THEN DELETE&quot;;
+
+<span class="fc" id="L412">    String destinationTableName = fullTableName(destinationTableId);</span>
+<span class="fc" id="L413">    String temporaryTableName = fullTableName(temporaryTableId);</span>
+<span class="fc" id="L414">    String sqlQuery = String.format(queryFormat, destinationTableName, temporaryTableName);</span>
+<span class="fc" id="L415">    QueryJobConfiguration queryConfig =</span>
+        jobConfigurationFactory
+<span class="fc" id="L417">            .createQueryJobConfigurationBuilder(sqlQuery, Collections.emptyMap())</span>
+<span class="fc" id="L418">            .setUseLegacySql(false)</span>
+<span class="fc" id="L419">            .build();</span>
+
+<span class="fc" id="L421">    return create(JobInfo.newBuilder(queryConfig).build());</span>
+  }
+
+  /**
+   * Appends all the data from the given temporary table, to the given destination table,
+   * transactionally.
+   *
+   * @param temporaryTableId The {@code TableId} representing the temporary-table.
+   * @param destinationTableId The {@code TableId} representing the destination table.
+   * @return The {@code Job} object representing this operation (which can be tracked to wait until
+   *     it has finished successfully).
+   */
+  public Job appendDestinationWithTemporary(TableId temporaryTableId, TableId destinationTableId) {
+<span class="fc" id="L434">    return copyData(temporaryTableId, destinationTableId, JobInfo.WriteDisposition.WRITE_APPEND);</span>
+  }
+
+  /**
+   * Creates a String appropriately formatted for BigQuery Storage Write API representing the given
+   * table.
+   *
+   * @param tableId The {@code TableId} representing the given object.
+   * @return The formatted String.
+   */
+  public String createTablePathForBigQueryStorage(TableId tableId) {
+<span class="fc" id="L445">    Preconditions.checkNotNull(tableId, &quot;tableId cannot be null&quot;);</span>
+    // We need the full path for the createWriteStream method. We used to have it by creating the
+    // table and then taking its full tableId, but that caused an issue with the ErrorIfExists
+    // implementation (now the check, done in another place is positive). To solve it, we do what
+    // the BigQuery client does on Table ID with no project - take the BigQuery client own project
+    // ID.  This gives us the same behavior but allows us to defer the table creation to the last
+    // minute.
+<span class="pc bpc" id="L452" title="1 of 2 branches missed.">    String project = tableId.getProject() != null ? tableId.getProject() : getProjectId();</span>
+<span class="fc" id="L453">    return String.format(</span>
+<span class="fc" id="L454">        &quot;projects/%s/datasets/%s/tables/%s&quot;, project, tableId.getDataset(), tableId.getTable());</span>
+  }
+
+  public TableInfo getReadTable(ReadTableOptions options) {
+<span class="fc" id="L458">    Optional&lt;String&gt; query = options.query();</span>
+    // first, let check if this is a query
+<span class="fc bfc" id="L460" title="All 2 branches covered.">    if (query.isPresent()) {</span>
+      // in this case, let's materialize it and use it as the table
+<span class="fc" id="L462">      validateViewsEnabled(options);</span>
+<span class="fc" id="L463">      String sql = query.get();</span>
+<span class="fc" id="L464">      return materializeQueryToTable(</span>
+          sql,
+<span class="fc" id="L466">          options.expirationTimeInMinutes(),</span>
+<span class="fc" id="L467">          options.getQueryParameterHelper(),</span>
+<span class="fc" id="L468">          options.getKmsKeyName());</span>
+    }
+
+<span class="fc" id="L471">    TableInfo table = getTable(options.tableId());</span>
+<span class="fc bfc" id="L472" title="All 2 branches covered.">    if (table == null) {</span>
+<span class="fc" id="L473">      return null;</span>
+    }
+
+<span class="fc" id="L476">    TableDefinition tableDefinition = table.getDefinition();</span>
+<span class="fc" id="L477">    TableDefinition.Type tableType = tableDefinition.getType();</span>
+<span class="fc bfc" id="L478" title="All 6 branches covered.">    if (TableDefinition.Type.TABLE == tableType</span>
+        || TableDefinition.Type.EXTERNAL == tableType
+        || TableDefinition.Type.SNAPSHOT == tableType) {
+<span class="fc" id="L481">      return table;</span>
+    }
+<span class="pc bpc" id="L483" title="3 of 4 branches missed.">    if (TableDefinition.Type.VIEW == tableType</span>
+        || TableDefinition.Type.MATERIALIZED_VIEW == tableType) {
+<span class="fc" id="L485">      validateViewsEnabled(options);</span>
+      // view materialization is done in a lazy manner, so it can occur only when the data is read
+<span class="fc" id="L487">      return table;</span>
+    }
+    // not regular table or a view
+<span class="nc" id="L490">    throw new BigQueryConnectorException(</span>
+        BigQueryErrorCode.UNSUPPORTED,
+<span class="nc" id="L492">        String.format(</span>
+            &quot;Table type '%s' of table '%s.%s' is not supported&quot;,
+<span class="nc" id="L494">            tableType, table.getTableId().getDataset(), table.getTableId().getTable()));</span>
+  }
+
+  /**
+   * Returns the schema of the table/query/view. Uses dryRun to get the query schema instead of
+   * materializing it.
+   *
+   * @param options The {@code ReadTableOptions} options for reading the data source.
+   * @return The schema.
+   */
+  public Schema getReadTableSchema(ReadTableOptions options) {
+<span class="fc" id="L505">    Optional&lt;String&gt; query = options.query();</span>
+    // lazy materialization if it's a query
+<span class="fc bfc" id="L507" title="All 2 branches covered.">    if (query.isPresent()) {</span>
+<span class="fc" id="L508">      validateViewsEnabled(options);</span>
+<span class="fc" id="L509">      String sql = query.get();</span>
+<span class="fc" id="L510">      return getQueryResultSchema(</span>
+<span class="fc" id="L511">          sql, Collections.emptyMap(), options.getQueryParameterHelper(), options.getKmsKeyName());</span>
+    }
+<span class="fc" id="L513">    TableInfo table = getReadTable(options);</span>
+<span class="fc bfc" id="L514" title="All 2 branches covered.">    return table != null ? table.getDefinition().getSchema() : null;</span>
+  }
+
+  private void validateViewsEnabled(ReadTableOptions options) {
+<span class="pc bpc" id="L518" title="1 of 2 branches missed.">    if (!options.viewsEnabled()) {</span>
+<span class="nc" id="L519">      throw new BigQueryConnectorException(</span>
+          BigQueryErrorCode.UNSUPPORTED,
+<span class="nc" id="L521">          String.format(</span>
+              &quot;Views are not enabled. You can enable views by setting '%s' to true. Notice&quot;
+                  + &quot; additional cost may occur.&quot;,
+<span class="nc" id="L524">              options.viewEnabledParamName()));</span>
+    }
+<span class="fc" id="L526">  }</span>
+
+  DatasetId toDatasetId(TableId tableId) {
+<span class="nc" id="L529">    return DatasetId.of(tableId.getProject(), tableId.getDataset());</span>
+  }
+
+  public String getProjectId() {
+<span class="fc" id="L533">    return bigQuery.getOptions().getProjectId();</span>
+  }
+
+  public Iterable&lt;Dataset&gt; listDatasets() {
+<span class="nc" id="L537">    return listDatasetsForProject(getProjectId());</span>
+  }
+
+  public Iterable&lt;Dataset&gt; listDatasetsForProject(String projectId) {
+<span class="nc" id="L541">    return bigQuery.listDatasets(projectId).iterateAll();</span>
+  }
+
+  public Iterable&lt;Table&gt; listTables(DatasetId datasetId, TableDefinition.Type... types) {
+<span class="fc" id="L545">    Set&lt;TableDefinition.Type&gt; allowedTypes = ImmutableSet.copyOf(types);</span>
+<span class="fc" id="L546">    Iterable&lt;Table&gt; allTables = bigQuery.listTables(datasetId).iterateAll();</span>
+<span class="fc" id="L547">    return StreamSupport.stream(allTables.spliterator(), false)</span>
+<span class="fc" id="L548">        .filter(table -&gt; allowedTypes.contains(table.getDefinition().getType()))</span>
+<span class="fc" id="L549">        .collect(ImmutableList.toImmutableList());</span>
+  }
+
+  public Table update(TableInfo table) {
+<span class="fc" id="L553">    return bigQuery.update(table);</span>
+  }
+
+  public Job createAndWaitFor(JobConfiguration.Builder jobConfiguration) {
+<span class="fc" id="L557">    return createAndWaitFor(jobConfiguration.build());</span>
+  }
+
+  public Job createAndWaitFor(JobConfiguration jobConfiguration) {
+<span class="fc" id="L561">    JobInfo jobInfo = JobInfo.of(jobConfiguration);</span>
+<span class="fc" id="L562">    Job job = bigQuery.create(jobInfo);</span>
+<span class="fc" id="L563">    Job returnedJob = null;</span>
+
+<span class="fc" id="L565">    log.info(&quot;Submitted job {}. jobId: {}&quot;, jobConfiguration, job.getJobId());</span>
+    try {
+<span class="fc" id="L567">      Job completedJob = job.waitFor();</span>
+<span class="pc bpc" id="L568" title="1 of 2 branches missed.">      if (completedJob == null) {</span>
+<span class="nc" id="L569">        throw new BigQueryException(</span>
+            BaseHttpServiceException.UNKNOWN_CODE,
+<span class="nc" id="L571">            String.format(&quot;Failed to run the job [%s], got null back&quot;, job));</span>
+      }
+<span class="pc bpc" id="L573" title="1 of 2 branches missed.">      if (completedJob.getStatus().getError() != null) {</span>
+<span class="nc" id="L574">        throw new BigQueryException(</span>
+            BaseHttpServiceException.UNKNOWN_CODE,
+<span class="nc" id="L576">            String.format(</span>
+<span class="nc" id="L577">                &quot;Failed to run the job [%s], due to '%s'&quot;, completedJob.getStatus().getError()));</span>
+      }
+<span class="fc" id="L579">      return completedJob;</span>
+<span class="nc" id="L580">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L581">      Thread.currentThread().interrupt();</span>
+<span class="nc" id="L582">      throw new BigQueryException(</span>
+          BaseHttpServiceException.UNKNOWN_CODE,
+<span class="nc" id="L584">          String.format(&quot;Failed to run the job [%s], task was interrupted&quot;, job),</span>
+          e);
+    }
+  }
+
+  Job create(JobInfo jobInfo) {
+<span class="fc" id="L590">    return bigQuery.create(jobInfo);</span>
+  }
+
+  public TableResult query(String sql) {
+    try {
+<span class="fc" id="L595">      return bigQuery.query(</span>
+          jobConfigurationFactory
+<span class="fc" id="L597">              .createQueryJobConfigurationBuilder(sql, Collections.emptyMap())</span>
+<span class="fc" id="L598">              .build());</span>
+<span class="nc" id="L599">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L600">      Thread.currentThread().interrupt();</span>
+<span class="nc" id="L601">      throw new BigQueryException(</span>
+          BaseHttpServiceException.UNKNOWN_CODE,
+<span class="nc" id="L603">          String.format(&quot;Failed to run the query [%s]&quot;, sql),</span>
+          e);
+    }
+  }
+
+  String createSql(
+      TableId table,
+      ImmutableList&lt;String&gt; requiredColumns,
+      String[] filters,
+      OptionalLong snapshotTimeMillis) {
+<span class="fc" id="L613">    String columns =</span>
+<span class="fc bfc" id="L614" title="All 2 branches covered.">        requiredColumns.isEmpty()</span>
+            ? &quot;*&quot;
+<span class="fc" id="L616">            : requiredColumns.stream()</span>
+<span class="fc" id="L617">                .map(column -&gt; String.format(&quot;`%s`&quot;, column))</span>
+<span class="fc" id="L618">                .collect(Collectors.joining(&quot;,&quot;));</span>
+
+<span class="fc" id="L620">    return createSql(table, columns, filters, snapshotTimeMillis);</span>
+  }
+
+  // assuming the SELECT part is properly formatted, can be used to call functions such as COUNT and
+  // SUM
+  String createSql(
+      TableId table, String formattedQuery, String[] filters, OptionalLong snapshotTimeMillis) {
+<span class="fc" id="L627">    String tableName = fullTableName(table);</span>
+
+<span class="fc" id="L629">    String whereClause = createWhereClause(filters).map(clause -&gt; &quot;WHERE &quot; + clause).orElse(&quot;&quot;);</span>
+
+<span class="fc" id="L631">    String snapshotTimeClause =</span>
+<span class="pc bpc" id="L632" title="1 of 2 branches missed.">        snapshotTimeMillis.isPresent()</span>
+<span class="pc" id="L633">            ? String.format(</span>
+<span class="nc" id="L634">                &quot;FOR SYSTEM_TIME AS OF TIMESTAMP_MILLIS(%d)&quot;, snapshotTimeMillis.getAsLong())</span>
+            : &quot;&quot;;
+
+<span class="fc" id="L637">    return String.format(</span>
+        &quot;SELECT %s FROM `%s` %s %s&quot;, formattedQuery, tableName, whereClause, snapshotTimeClause);
+  }
+
+  public static String fullTableName(TableId tableId) {
+<span class="fc bfc" id="L642" title="All 2 branches covered.">    if (tableId.getProject() == null) {</span>
+<span class="fc" id="L643">      return String.format(&quot;%s.%s&quot;, tableId.getDataset(), tableId.getTable());</span>
+    } else {
+<span class="fc" id="L645">      return String.format(</span>
+<span class="fc" id="L646">          &quot;%s.%s.%s&quot;, tableId.getProject(), tableId.getDataset(), tableId.getTable());</span>
+    }
+  }
+
+  public long calculateTableSize(TableId tableId, Optional&lt;String&gt; filter) {
+<span class="fc" id="L651">    return calculateTableSize(getTable(tableId), filter);</span>
+  }
+
+  public long calculateTableSize(TableInfo tableInfo, Optional&lt;String&gt; filter) {
+<span class="fc" id="L655">    TableDefinition.Type type = tableInfo.getDefinition().getType();</span>
+<span class="fc bfc" id="L656" title="All 4 branches covered.">    if ((type == TableDefinition.Type.EXTERNAL || type == TableDefinition.Type.TABLE)</span>
+<span class="fc bfc" id="L657" title="All 2 branches covered.">        &amp;&amp; !filter.isPresent()) {</span>
+<span class="fc bfc" id="L658" title="All 2 branches covered.">      if (isBigQueryNativeTable(tableInfo)</span>
+<span class="fc bfc" id="L659" title="All 2 branches covered.">          &amp;&amp; tableInfo.getRequirePartitionFilter() != null</span>
+<span class="fc bfc" id="L660" title="All 2 branches covered.">          &amp;&amp; tableInfo.getRequirePartitionFilter()) {</span>
+<span class="fc" id="L661">        List&lt;String&gt; partitioningFields = getPartitionFields(tableInfo);</span>
+<span class="pc bpc" id="L662" title="1 of 2 branches missed.">        if (partitioningFields.isEmpty()) {</span>
+<span class="nc" id="L663">          throw new IllegalStateException(</span>
+              &quot;Could not find partitioning columns for table requiring partition filter: &quot;
+<span class="nc" id="L665">                  + tableInfo.getTableId());</span>
+        }
+<span class="fc" id="L667">        String table = fullTableName(tableInfo.getTableId());</span>
+<span class="fc" id="L668">        return getNumberOfRows(</span>
+<span class="fc" id="L669">            String.format(</span>
+                &quot;SELECT COUNT(*) from `%s` WHERE %s IS NOT NULL&quot;,
+<span class="fc" id="L671">                table, partitioningFields.get(0)));</span>
+      }
+<span class="fc" id="L673">      String table = fullTableName(tableInfo.getTableId());</span>
+<span class="fc" id="L674">      return getNumberOfRows(String.format(&quot;SELECT COUNT(*) from `%s`&quot;, table));</span>
+<span class="pc bpc" id="L675" title="4 of 8 branches missed.">    } else if (type == TableDefinition.Type.VIEW</span>
+        || type == TableDefinition.Type.MATERIALIZED_VIEW
+        || ((type == TableDefinition.Type.TABLE || type == TableDefinition.Type.EXTERNAL)
+<span class="pc bpc" id="L678" title="1 of 2 branches missed.">            &amp;&amp; filter.isPresent())) {</span>
+      // run a query
+<span class="fc" id="L680">      String table = fullTableName(tableInfo.getTableId());</span>
+<span class="fc" id="L681">      String whereClause = filter.map(f -&gt; &quot;WHERE &quot; + f).orElse(&quot;&quot;);</span>
+<span class="fc" id="L682">      return getNumberOfRows(String.format(&quot;SELECT COUNT(*) from `%s` %s&quot;, table, whereClause));</span>
+    } else {
+<span class="nc" id="L684">      throw new IllegalArgumentException(</span>
+<span class="nc" id="L685">          String.format(</span>
+              &quot;Unsupported table type %s for table %s&quot;,
+<span class="nc" id="L687">              type, fullTableName(tableInfo.getTableId())));</span>
+    }
+  }
+
+  private long getNumberOfRows(String sql) {
+<span class="fc" id="L692">    TableResult result = query(sql);</span>
+<span class="fc" id="L693">    long numberOfRows = result.iterateAll().iterator().next().get(0).getLongValue();</span>
+<span class="fc" id="L694">    return numberOfRows;</span>
+  }
+
+  /**
+   * Runs the provided query on BigQuery and saves the result in a temporary table.
+   *
+   * @param querySql the query to be run
+   * @param expirationTimeInMinutes the expiration time of the temporary table
+   * @param queryParameterHelper the query parameter helper
+   * @param kmsKeyName optional KMS key name to be used for encrypting the temporary table
+   * @return a reference to the table
+   */
+  public TableInfo materializeQueryToTable(
+      String querySql,
+      int expirationTimeInMinutes,
+      QueryParameterHelper queryParameterHelper,
+      Optional&lt;String&gt; kmsKeyName) {
+<span class="fc" id="L711">    Optional&lt;TableId&gt; tableId =</span>
+<span class="fc" id="L712">        materializationDataset.map(ignored -&gt; createDestinationTableWithoutReference());</span>
+<span class="fc" id="L713">    return materializeTable(</span>
+        querySql, tableId, expirationTimeInMinutes, queryParameterHelper, kmsKeyName);
+  }
+
+  TableId createDestinationTableWithoutReference() {
+<span class="fc" id="L718">    return createDestinationTable(Optional.empty(), Optional.empty());</span>
+  }
+
+  TableId createDestinationTable(
+      Optional&lt;String&gt; referenceProject, Optional&lt;String&gt; referenceDataset) {
+<span class="fc" id="L723">    String project = materializationProject.orElse(referenceProject.orElse(null));</span>
+<span class="fc" id="L724">    String dataset = materializationDataset.orElse(referenceDataset.orElse(null));</span>
+<span class="fc" id="L725">    String name =</span>
+<span class="fc" id="L726">        String.format(</span>
+<span class="fc" id="L727">            &quot;_bqc_%s&quot;, UUID.randomUUID().toString().toLowerCase(Locale.ENGLISH).replace(&quot;-&quot;, &quot;&quot;));</span>
+<span class="fc bfc" id="L728" title="All 2 branches covered.">    return project == null ? TableId.of(dataset, name) : TableId.of(project, dataset, name);</span>
+  }
+
+  /**
+   * Runs the provided query on BigQuery and saves the result in a temporary table.
+   *
+   * @param querySql the query to be run
+   * @param additionalQueryJobLabels the labels to insert on the query job
+   * @return a reference to the table
+   */
+  public TableInfo materializeQueryToTable(
+      String querySql,
+      int expirationTimeInMinutes,
+      Map&lt;String, String&gt; additionalQueryJobLabels,
+      QueryParameterHelper queryParameterHelper) {
+<span class="nc" id="L743">    return materializeQueryToTable(</span>
+        querySql,
+        expirationTimeInMinutes,
+        additionalQueryJobLabels,
+        queryParameterHelper,
+<span class="nc" id="L748">        Optional.empty());</span>
+  }
+
+  /**
+   * Runs the provided query on BigQuery and saves the result in a temporary table.
+   *
+   * @param querySql the query to be run
+   * @param additionalQueryJobLabels the labels to insert on the query job
+   * @return a reference to the table
+   */
+  public TableInfo materializeQueryToTable(
+      String querySql,
+      int expirationTimeInMinutes,
+      Map&lt;String, String&gt; additionalQueryJobLabels,
+      QueryParameterHelper queryParameterHelper,
+      Optional&lt;String&gt; kmsKeyName) {
+<span class="nc" id="L764">    Optional&lt;TableId&gt; destinationTableId =</span>
+<span class="nc" id="L765">        materializationDataset.map(ignored -&gt; createDestinationTableWithoutReference());</span>
+<span class="nc" id="L766">    TempTableBuilder tableBuilder =</span>
+        new TempTableBuilder(
+            this,
+            querySql,
+            destinationTableId,
+            expirationTimeInMinutes,
+            jobConfigurationFactory,
+            additionalQueryJobLabels,
+            queryParameterHelper,
+            kmsKeyName);
+
+<span class="nc" id="L777">    return materializeTable(querySql, tableBuilder);</span>
+  }
+
+  /**
+   * Runs the provided query on BigQuery and saves the result in a temporary table. This method is
+   * intended to be used to materialize views, so the view location (based on its TableId) is taken
+   * as a location for the temporary table, removing the need to set the materializationProject and
+   * materializationDataset properties
+   *
+   * @param querySql the query to be run
+   * @param viewId the view the query came from
+   * @return a reference to the table
+   */
+  public TableInfo materializeViewToTable(
+      String querySql, TableId viewId, int expirationTimeInMinutes) {
+<span class="fc" id="L792">    TableId tableId =</span>
+<span class="fc" id="L793">        createDestinationTable(</span>
+<span class="fc" id="L794">            Optional.ofNullable(viewId.getProject()), Optional.ofNullable(viewId.getDataset()));</span>
+<span class="fc" id="L795">    return materializeTable(</span>
+        querySql,
+<span class="fc" id="L797">        Optional.of(tableId),</span>
+        expirationTimeInMinutes,
+<span class="fc" id="L799">        QueryParameterHelper.none(),</span>
+<span class="fc" id="L800">        Optional.empty());</span>
+  }
+
+  public Schema getQueryResultSchema(
+      String querySql,
+      Map&lt;String, String&gt; additionalQueryJobLabels,
+      QueryParameterHelper queryParameterHelper) {
+<span class="nc" id="L807">    return getQueryResultSchema(</span>
+<span class="nc" id="L808">        querySql, additionalQueryJobLabels, queryParameterHelper, Optional.empty());</span>
+  }
+
+  public Schema getQueryResultSchema(
+      String querySql,
+      Map&lt;String, String&gt; additionalQueryJobLabels,
+      QueryParameterHelper queryParameterHelper,
+      Optional&lt;String&gt; kmsKeyName) {
+<span class="fc" id="L816">    QueryJobConfiguration.Builder builder =</span>
+        jobConfigurationFactory
+<span class="fc" id="L818">            .createParameterizedQueryJobConfigurationBuilder(</span>
+                querySql, additionalQueryJobLabels, queryParameterHelper)
+<span class="fc" id="L820">            .setDryRun(true);</span>
+<span class="fc" id="L821">    kmsKeyName.ifPresent(</span>
+        k -&gt;
+<span class="fc" id="L823">            builder.setDestinationEncryptionConfiguration(</span>
+<span class="fc" id="L824">                EncryptionConfiguration.newBuilder().setKmsKeyName(k).build()));</span>
+<span class="fc" id="L825">    JobInfo jobInfo = JobInfo.of(builder.build());</span>
+
+<span class="fc" id="L827">    log.info(&quot;running query dryRun {}&quot;, querySql);</span>
+<span class="fc" id="L828">    JobInfo completedJobInfo = create(jobInfo);</span>
+<span class="pc bpc" id="L829" title="1 of 2 branches missed.">    if (completedJobInfo.getStatus().getError() != null) {</span>
+<span class="nc" id="L830">      throw BigQueryUtil.convertToBigQueryException(completedJobInfo.getStatus().getError());</span>
+    }
+<span class="fc" id="L832">    JobStatistics.QueryStatistics queryStatistics = completedJobInfo.getStatistics();</span>
+<span class="fc" id="L833">    return queryStatistics.getSchema();</span>
+  }
+
+  private TableInfo materializeTable(
+      String querySql,
+      Optional&lt;TableId&gt; destinationTableId,
+      int expirationTimeInMinutes,
+      QueryParameterHelper queryParameterHelper) {
+<span class="nc" id="L841">    return materializeTable(</span>
+        querySql,
+        destinationTableId,
+        expirationTimeInMinutes,
+        queryParameterHelper,
+<span class="nc" id="L846">        Optional.empty());</span>
+  }
+
+  private TableInfo materializeTable(
+      String querySql,
+      Optional&lt;TableId&gt; destinationTableId,
+      int expirationTimeInMinutes,
+      QueryParameterHelper queryParameterHelper,
+      Optional&lt;String&gt; kmsKeyName) {
+    try {
+<span class="fc" id="L856">      return destinationTableCache.get(</span>
+          querySql,
+          new TempTableBuilder(
+              this,
+              querySql,
+              destinationTableId,
+              expirationTimeInMinutes,
+              jobConfigurationFactory,
+<span class="fc" id="L864">              Collections.emptyMap(),</span>
+              queryParameterHelper,
+              kmsKeyName));
+<span class="fc" id="L867">    } catch (Exception e) {</span>
+<span class="fc" id="L868">      throw new BigQueryConnectorException(</span>
+          BigQueryErrorCode.BIGQUERY_VIEW_DESTINATION_TABLE_CREATION_FAILED,
+<span class="fc" id="L870">          String.format(</span>
+              &quot;Error creating destination table using the following query: [%s]&quot;, querySql),
+          e);
+    }
+  }
+
+  private TableInfo materializeTable(String querySql, TempTableBuilder tmpTableBuilder) {
+    try {
+<span class="nc" id="L878">      return destinationTableCache.get(querySql, tmpTableBuilder);</span>
+<span class="nc" id="L879">    } catch (Exception e) {</span>
+<span class="nc" id="L880">      throw new BigQueryConnectorException(</span>
+          BigQueryErrorCode.BIGQUERY_VIEW_DESTINATION_TABLE_CREATION_FAILED,
+<span class="nc" id="L882">          String.format(</span>
+              &quot;Error creating destination table using the following query: [%s]&quot;, querySql),
+          e);
+    }
+  }
+
+  public JobStatistics.LoadStatistics loadDataIntoTable(
+      LoadDataOptions options,
+      List&lt;String&gt; sourceUris,
+      FormatOptions formatOptions,
+      JobInfo.WriteDisposition writeDisposition,
+      Optional&lt;Schema&gt; schema,
+      TableId destinationTable) {
+<span class="fc" id="L895">    LoadJobConfiguration.Builder jobConfiguration =</span>
+        jobConfigurationFactory
+<span class="fc" id="L897">            .createLoadJobConfigurationBuilder(destinationTable, sourceUris, formatOptions)</span>
+<span class="fc" id="L898">            .setCreateDisposition(JobInfo.CreateDisposition.CREATE_IF_NEEDED)</span>
+<span class="fc" id="L899">            .setWriteDisposition(writeDisposition);</span>
+
+<span class="pc bpc" id="L901" title="1 of 2 branches missed.">    if (schema.isPresent()) {</span>
+<span class="fc" id="L902">      jobConfiguration.setSchema(schema.get());</span>
+    } else {
+      // no schema, probably table does not exist
+<span class="nc" id="L905">      jobConfiguration.setAutodetect(true);</span>
+    }
+
+<span class="fc" id="L908">    options.getCreateDisposition().ifPresent(jobConfiguration::setCreateDisposition);</span>
+
+<span class="pc bpc" id="L910" title="1 of 4 branches missed.">    if (options.getPartitionField().isPresent() || options.getPartitionType().isPresent()) {</span>
+<span class="fc" id="L911">      TimePartitioning.Builder timePartitionBuilder =</span>
+<span class="fc" id="L912">          TimePartitioning.newBuilder(options.getPartitionTypeOrDefault());</span>
+<span class="fc" id="L913">      options.getPartitionExpirationMs().ifPresent(timePartitionBuilder::setExpirationMs);</span>
+<span class="fc" id="L914">      options</span>
+<span class="fc" id="L915">          .getPartitionRequireFilter()</span>
+<span class="fc" id="L916">          .ifPresent(timePartitionBuilder::setRequirePartitionFilter);</span>
+<span class="fc" id="L917">      options.getPartitionField().ifPresent(timePartitionBuilder::setField);</span>
+<span class="fc" id="L918">      jobConfiguration.setTimePartitioning(timePartitionBuilder.build());</span>
+    }
+<span class="fc bfc" id="L920" title="All 4 branches covered.">    if (options.getPartitionField().isPresent() &amp;&amp; options.getPartitionRange().isPresent()) {</span>
+<span class="fc" id="L921">      RangePartitioning.Builder rangePartitionBuilder = RangePartitioning.newBuilder();</span>
+<span class="fc" id="L922">      options.getPartitionField().ifPresent(rangePartitionBuilder::setField);</span>
+<span class="fc" id="L923">      options.getPartitionRange().ifPresent(rangePartitionBuilder::setRange);</span>
+<span class="fc" id="L924">      jobConfiguration.setRangePartitioning(rangePartitionBuilder.build());</span>
+    }
+
+<span class="fc" id="L927">    options</span>
+<span class="fc" id="L928">        .getClusteredFields()</span>
+<span class="fc" id="L929">        .ifPresent(</span>
+            clusteredFields -&gt; {
+<span class="fc" id="L931">              Clustering clustering = Clustering.newBuilder().setFields(clusteredFields).build();</span>
+<span class="fc" id="L932">              jobConfiguration.setClustering(clustering);</span>
+<span class="fc" id="L933">            });</span>
+
+<span class="pc bpc" id="L935" title="1 of 2 branches missed.">    if (options.isUseAvroLogicalTypes()) {</span>
+<span class="nc" id="L936">      jobConfiguration.setUseAvroLogicalTypes(true);</span>
+    }
+
+<span class="pc bpc" id="L939" title="1 of 2 branches missed.">    if (!options.getDecimalTargetTypes().isEmpty()) {</span>
+<span class="nc" id="L940">      jobConfiguration.setDecimalTargetTypes(options.getDecimalTargetTypes());</span>
+    }
+
+<span class="fc bfc" id="L943" title="All 2 branches covered.">    if (!options.getLoadSchemaUpdateOptions().isEmpty()) {</span>
+<span class="fc" id="L944">      jobConfiguration.setSchemaUpdateOptions(options.getLoadSchemaUpdateOptions());</span>
+    }
+
+<span class="fc" id="L947">    options</span>
+<span class="fc" id="L948">        .getKmsKeyName()</span>
+<span class="fc" id="L949">        .ifPresent(</span>
+            destinationTableKmsKeyName -&gt;
+<span class="fc" id="L951">                jobConfiguration.setDestinationEncryptionConfiguration(</span>
+<span class="fc" id="L952">                    EncryptionConfiguration.newBuilder()</span>
+<span class="fc" id="L953">                        .setKmsKeyName(destinationTableKmsKeyName)</span>
+<span class="fc" id="L954">                        .build()));</span>
+
+<span class="fc" id="L956">    Job finishedJob = null;</span>
+    try {
+<span class="fc" id="L958">      finishedJob = createAndWaitFor(jobConfiguration);</span>
+
+<span class="pc bpc" id="L960" title="1 of 2 branches missed.">      if (finishedJob.getStatus().getError() != null) {</span>
+<span class="nc" id="L961">        throw new BigQueryException(</span>
+            BaseHttpServiceException.UNKNOWN_CODE,
+<span class="nc" id="L963">            String.format(</span>
+                &quot;Failed to load to %s in job %s. BigQuery error was '%s'&quot;,
+<span class="nc" id="L965">                BigQueryUtil.friendlyTableName(options.getTableId()),</span>
+<span class="nc" id="L966">                finishedJob.getJobId(),</span>
+<span class="nc" id="L967">                finishedJob.getStatus().getError().getMessage()),</span>
+<span class="nc" id="L968">            finishedJob.getStatus().getError());</span>
+      } else {
+<span class="fc" id="L970">        log.info(</span>
+            &quot;Done loading to {}. jobId: {}&quot;,
+<span class="fc" id="L972">            BigQueryUtil.friendlyTableName(options.getTableId()),</span>
+<span class="fc" id="L973">            finishedJob.getJobId());</span>
+<span class="fc" id="L974">        return finishedJob.getStatistics();</span>
+      }
+<span class="nc" id="L976">    } catch (Exception e) {</span>
+<span class="nc bnc" id="L977" title="All 2 branches missed.">      if (finishedJob == null) {</span>
+<span class="nc" id="L978">        log.error(</span>
+            &quot;Unable to create the job to load to {}&quot;,
+<span class="nc" id="L980">            BigQueryUtil.friendlyTableName(options.getTableId()));</span>
+<span class="nc" id="L981">        throw e;</span>
+      }
+<span class="nc" id="L983">      TimePartitioning.Type partitionType = options.getPartitionTypeOrDefault();</span>
+
+<span class="nc" id="L985">      if (e.getMessage()</span>
+<span class="nc bnc" id="L986" title="All 2 branches missed.">              .equals(</span>
+<span class="nc" id="L987">                  String.format(&quot;Cannot output %s partitioned data in LegacySQL&quot;, partitionType))</span>
+<span class="nc bnc" id="L988" title="All 2 branches missed.">          &amp;&amp; formatOptions.equals(FormatOptions.parquet())) {</span>
+<span class="nc" id="L989">        throw new BigQueryException(</span>
+            0,
+<span class="nc" id="L991">            String.format(</span>
+                &quot;%s time partitioning is not available &quot;
+                    + &quot;for load jobs from PARQUET in this project yet. Please replace the intermediate &quot;
+                    + &quot;format to AVRO or contact your account manager to enable this.&quot;,
+                partitionType),
+            e);
+      }
+<span class="nc" id="L998">      JobId jobId = finishedJob.getJobId();</span>
+<span class="nc" id="L999">      log.warn(</span>
+<span class="nc" id="L1000">          String.format(</span>
+              &quot;Failed to load the data into BigQuery, JobId for debug purposes is [%s:%s.%s]&quot;,
+<span class="nc" id="L1002">              jobId.getProject(), jobId.getLocation(), jobId.getJob()));</span>
+<span class="nc" id="L1003">      throw new BigQueryException(0, &quot;Problem loading data into BigQuery&quot;, e);</span>
+    }
+  }
+
+  /** Creates the table with the given schema, only if it does not exist yet. */
+  public void createTableIfNeeded(
+      TableId tableId, Schema bigQuerySchema, CreateTableOptions options) {
+<span class="pc bpc" id="L1010" title="1 of 2 branches missed.">    if (!tableExists(tableId)) {</span>
+<span class="nc" id="L1011">      createTable(tableId, bigQuerySchema, options);</span>
+    }
+<span class="fc" id="L1013">  }</span>
+
+  /**
+   * Retrieves the table's metadata from the REST client, may contain more information than the
+   * regular one
+   */
+  public Optional&lt;com.google.api.services.bigquery.model.Table&gt; getRestTable(TableId tableId) {
+    try {
+      // tableId.getProject() may be null, so we replacing it with the default project id
+<span class="nc" id="L1022">      String project =</span>
+<span class="nc" id="L1023">          Optional.ofNullable(tableId.getProject())</span>
+<span class="nc" id="L1024">              .orElseGet(() -&gt; bigQuery.getOptions().getProjectId());</span>
+<span class="nc" id="L1025">      return Optional.ofNullable(</span>
+          bigqueryRestClient
+<span class="nc" id="L1027">              .tables()</span>
+<span class="nc" id="L1028">              .get(project, tableId.getDataset(), tableId.getTable())</span>
+<span class="nc" id="L1029">              .execute());</span>
+<span class="nc" id="L1030">    } catch (IOException e) {</span>
+<span class="nc" id="L1031">      throw new UncheckedIOException(e);</span>
+    }
+  }
+
+  /** Returns true f the dataset exists, false otherwise. */
+  public boolean datasetExists(DatasetId datasetId) {
+<span class="nc bnc" id="L1037" title="All 2 branches missed.">    return bigQuery.getDataset(datasetId) != null;</span>
+  }
+
+  public void createDataset(DatasetId datasetId, Map&lt;String, String&gt; metadata) {
+<span class="nc" id="L1041">    DatasetInfo.Builder datasetInfo = DatasetInfo.newBuilder(datasetId);</span>
+    // In a non-catalog scenario, both BigQueryOptions.quotaProjectId and
+    // BigQueryOptions.projectId
+    // will be set to the parent projectId, as before.
+<span class="nc" id="L1045">    Optional.ofNullable(bigQuery.getOptions().getLocation()).ifPresent(datasetInfo::setLocation);</span>
+<span class="nc bnc" id="L1046" title="All 4 branches missed.">    if (metadata != null &amp;&amp; !metadata.isEmpty()) {</span>
+<span class="nc" id="L1047">      Optional.ofNullable(metadata.get(&quot;bigquery_location&quot;)).ifPresent(datasetInfo::setLocation);</span>
+<span class="nc" id="L1048">      Optional.ofNullable(metadata.get(&quot;comment&quot;)).ifPresent(datasetInfo::setDescription);</span>
+    }
+<span class="nc" id="L1050">    bigQuery.create(datasetInfo.build());</span>
+<span class="nc" id="L1051">  }</span>
+
+  public boolean deleteDataset(DatasetId datasetId, boolean cascade) {
+<span class="nc bnc" id="L1054" title="All 2 branches missed.">    BigQuery.DatasetDeleteOption[] options =</span>
+        cascade
+<span class="nc" id="L1056">            ? new BigQuery.DatasetDeleteOption[] {BigQuery.DatasetDeleteOption.deleteContents()}</span>
+            : new BigQuery.DatasetDeleteOption[] {};
+<span class="nc" id="L1058">    return bigQuery.delete(datasetId, options);</span>
+  }
+
+  public DatasetInfo getDataset(DatasetId datasetId) {
+<span class="nc" id="L1062">    return bigQuery.getDataset(datasetId);</span>
+  }
+
+  public interface ReadTableOptions {
+    TableId tableId();
+
+    Optional&lt;String&gt; query();
+
+    boolean viewsEnabled();
+
+    String viewEnabledParamName();
+
+    int expirationTimeInMinutes();
+
+    QueryParameterHelper getQueryParameterHelper();
+
+    default Optional&lt;String&gt; getKmsKeyName() {
+<span class="nc" id="L1079">      return Optional.empty();</span>
+    }
+  }
+
+  public interface LoadDataOptions {
+    TableId getTableId();
+
+    Optional&lt;JobInfo.CreateDisposition&gt; getCreateDisposition();
+
+    Optional&lt;String&gt; getPartitionField();
+
+    Optional&lt;TimePartitioning.Type&gt; getPartitionType();
+
+    Optional&lt;RangePartitioning.Range&gt; getPartitionRange();
+
+    TimePartitioning.Type getPartitionTypeOrDefault();
+
+    OptionalLong getPartitionExpirationMs();
+
+    Optional&lt;Boolean&gt; getPartitionRequireFilter();
+
+    Optional&lt;ImmutableList&lt;String&gt;&gt; getClusteredFields();
+
+    boolean isUseAvroLogicalTypes();
+
+    List&lt;String&gt; getDecimalTargetTypes();
+
+    List&lt;JobInfo.SchemaUpdateOption&gt; getLoadSchemaUpdateOptions();
+
+    boolean getEnableModeCheckForSchemaFields();
+
+    Optional&lt;String&gt; getKmsKeyName();
+  }
+
+  public interface CreateTableOptions {
+
+    default Optional&lt;String&gt; getKmsKeyName() {
+<span class="nc" id="L1116">      return Optional.empty();</span>
+    }
+
+    default Map&lt;String, String&gt; getBigQueryTableLabels() {
+<span class="nc" id="L1120">      return Collections.emptyMap();</span>
+    }
+
+    default Optional&lt;ImmutableList&lt;String&gt;&gt; getClusteredFields() {
+<span class="nc" id="L1124">      return Optional.empty();</span>
+    }
+
+    static CreateTableOptions of(
+        final Optional&lt;String&gt; kmsKeyName,
+        final Map&lt;String, String&gt; bigQueryTableLabels,
+        final Optional&lt;ImmutableList&lt;String&gt;&gt; clusteredFields) {
+<span class="fc" id="L1131">      return new CreateTableOptions() {</span>
+        @Override
+        public Optional&lt;String&gt; getKmsKeyName() {
+<span class="fc" id="L1134">          return kmsKeyName;</span>
+        }
+
+        @Override
+        public Map&lt;String, String&gt; getBigQueryTableLabels() {
+<span class="fc" id="L1139">          return bigQueryTableLabels;</span>
+        }
+
+        @Override
+        public Optional&lt;ImmutableList&lt;String&gt;&gt; getClusteredFields() {
+<span class="fc" id="L1144">          return clusteredFields;</span>
+        }
+      };
+    }
+  }
+
+  static class TempTableBuilder implements Callable&lt;TableInfo&gt; {
+    final BigQueryClient bigQueryClient;
+    final String querySql;
+    final Optional&lt;TableId&gt; tempTable;
+    final int expirationTimeInMinutes;
+    final JobConfigurationFactory jobConfigurationFactory;
+    final Map&lt;String, String&gt; additionalQueryJobLabels;
+    final QueryParameterHelper queryParameterHelper;
+    final Optional&lt;String&gt; kmsKeyName;
+
+    TempTableBuilder(
+        BigQueryClient bigQueryClient,
+        String querySql,
+        Optional&lt;TableId&gt; tempTable,
+        int expirationTimeInMinutes,
+        JobConfigurationFactory jobConfigurationFactory,
+        Map&lt;String, String&gt; additionalQueryJobLabels,
+        QueryParameterHelper queryParameterHelper) {
+<span class="nc" id="L1168">      this(</span>
+          bigQueryClient,
+          querySql,
+          tempTable,
+          expirationTimeInMinutes,
+          jobConfigurationFactory,
+          additionalQueryJobLabels,
+          queryParameterHelper,
+<span class="nc" id="L1176">          Optional.empty());</span>
+<span class="nc" id="L1177">    }</span>
+
+    TempTableBuilder(
+        BigQueryClient bigQueryClient,
+        String querySql,
+        Optional&lt;TableId&gt; tempTable,
+        int expirationTimeInMinutes,
+        JobConfigurationFactory jobConfigurationFactory,
+        Map&lt;String, String&gt; additionalQueryJobLabels,
+        QueryParameterHelper queryParameterHelper,
+<span class="fc" id="L1187">        Optional&lt;String&gt; kmsKeyName) {</span>
+<span class="fc" id="L1188">      this.bigQueryClient = bigQueryClient;</span>
+<span class="fc" id="L1189">      this.querySql = querySql;</span>
+<span class="fc" id="L1190">      this.tempTable = tempTable;</span>
+<span class="fc" id="L1191">      this.expirationTimeInMinutes = expirationTimeInMinutes;</span>
+<span class="fc" id="L1192">      this.jobConfigurationFactory = jobConfigurationFactory;</span>
+<span class="fc" id="L1193">      this.additionalQueryJobLabels = additionalQueryJobLabels;</span>
+<span class="fc" id="L1194">      this.queryParameterHelper = queryParameterHelper;</span>
+<span class="fc" id="L1195">      this.kmsKeyName = kmsKeyName;</span>
+<span class="fc" id="L1196">    }</span>
+
+    @Override
+    public TableInfo call() {
+<span class="fc" id="L1200">      return createTableFromQuery();</span>
+    }
+
+    TableInfo createTableFromQuery() {
+<span class="fc bfc" id="L1204" title="All 2 branches covered.">      if (tempTable.isPresent()) {</span>
+<span class="fc" id="L1205">        log.info(&quot;DestinationTable is {}&quot;, tempTable.get());</span>
+      } else {
+<span class="fc" id="L1207">        log.info(&quot;DestinationTable is automatically generated&quot;);</span>
+      }
+<span class="fc" id="L1209">      QueryJobConfiguration.Builder queryJobConfigurationBuilder =</span>
+<span class="fc" id="L1210">          jobConfigurationFactory.createParameterizedQueryJobConfigurationBuilder(</span>
+              querySql, additionalQueryJobLabels, queryParameterHelper);
+<span class="fc" id="L1212">      tempTable.ifPresent(queryJobConfigurationBuilder::setDestinationTable);</span>
+<span class="fc" id="L1213">      kmsKeyName.ifPresent(</span>
+          k -&gt;
+<span class="fc" id="L1215">              queryJobConfigurationBuilder.setDestinationEncryptionConfiguration(</span>
+<span class="fc" id="L1216">                  EncryptionConfiguration.newBuilder().setKmsKeyName(k).build()));</span>
+
+<span class="fc" id="L1218">      JobInfo jobInfo = JobInfo.of(queryJobConfigurationBuilder.build());</span>
+
+<span class="fc" id="L1220">      log.info(&quot;running query [{}]&quot;, querySql);</span>
+<span class="fc" id="L1221">      JobInfo completedJobInfo = bigQueryClient.waitForJob(bigQueryClient.create(jobInfo));</span>
+<span class="pc bpc" id="L1222" title="1 of 2 branches missed.">      if (completedJobInfo.getStatus().getError() != null) {</span>
+<span class="nc" id="L1223">        throw BigQueryUtil.convertToBigQueryException(completedJobInfo.getStatus().getError());</span>
+      }
+<span class="fc bfc" id="L1225" title="All 2 branches covered.">      if (tempTable.isPresent()) {</span>
+        // Registering a cleanup job
+<span class="pc" id="L1227">        CLEANUP_JOBS.add(() -&gt; bigQueryClient.deleteTable(tempTable.get()));</span>
+        // add expiration time to the table
+<span class="fc" id="L1229">        TableInfo createdTable = bigQueryClient.getTable(tempTable.get());</span>
+<span class="fc" id="L1230">        long expirationTime =</span>
+<span class="fc" id="L1231">            createdTable.getCreationTime() + TimeUnit.MINUTES.toMillis(expirationTimeInMinutes);</span>
+<span class="fc" id="L1232">        Table updatedTable =</span>
+<span class="fc" id="L1233">            bigQueryClient.update(</span>
+<span class="fc" id="L1234">                createdTable.toBuilder().setExpirationTime(expirationTime).build());</span>
+<span class="fc" id="L1235">        return updatedTable;</span>
+      }
+      // temp table was auto generated
+<span class="fc" id="L1238">      return bigQueryClient.getTable(</span>
+<span class="fc" id="L1239">          ((QueryJobConfiguration) completedJobInfo.getConfiguration()).getDestinationTable());</span>
+    }
+
+    Job waitForJob(Job job) {
+      try {
+<span class="nc" id="L1244">        log.info(</span>
+            &quot;Job submitted : {}, {},  Job type : {}&quot;,
+<span class="nc" id="L1246">            job.getJobId(),</span>
+<span class="nc" id="L1247">            job.getSelfLink(),</span>
+<span class="nc" id="L1248">            job.getConfiguration().getType());</span>
+<span class="nc" id="L1249">        Job completedJob = job.waitFor();</span>
+<span class="nc" id="L1250">        log.info(</span>
+            &quot;Job has finished {} creationTime : {}, startTime : {}, endTime : {} &quot;,
+<span class="nc" id="L1252">            completedJob.getJobId(),</span>
+<span class="nc" id="L1253">            completedJob.getStatistics().getCreationTime(),</span>
+<span class="nc" id="L1254">            completedJob.getStatistics().getStartTime(),</span>
+<span class="nc" id="L1255">            completedJob.getStatistics().getEndTime());</span>
+<span class="nc" id="L1256">        log.debug(&quot;Job has finished. {}&quot;, completedJob);</span>
+<span class="nc" id="L1257">        return completedJob;</span>
+<span class="nc" id="L1258">      } catch (InterruptedException e) {</span>
+<span class="nc" id="L1259">        Thread.currentThread().interrupt();</span>
+<span class="nc" id="L1260">        throw new BigQueryException(</span>
+            BaseServiceException.UNKNOWN_CODE,
+<span class="nc" id="L1262">            String.format(&quot;Job %s has been interrupted&quot;, job.getJobId()),</span>
+            e);
+      }
+    }
+  }
+
+  static class JobConfigurationFactory {
+    private final ImmutableMap&lt;String, String&gt; labels;
+    private final Priority queryJobPriority;
+
+<span class="fc" id="L1272">    public JobConfigurationFactory(Map&lt;String, String&gt; labels, Priority queryJobPriority) {</span>
+<span class="fc" id="L1273">      this.labels = ImmutableMap.copyOf(labels);</span>
+<span class="fc" id="L1274">      this.queryJobPriority = queryJobPriority;</span>
+<span class="fc" id="L1275">    }</span>
+
+    QueryJobConfiguration.Builder createQueryJobConfigurationBuilder(
+        String querySql, Map&lt;String, String&gt; additionalQueryJobLabels) {
+<span class="fc" id="L1279">      return createParameterizedQueryJobConfigurationBuilder(</span>
+<span class="fc" id="L1280">          querySql, additionalQueryJobLabels, QueryParameterHelper.none());</span>
+    }
+
+    QueryJobConfiguration.Builder createParameterizedQueryJobConfigurationBuilder(
+        String querySql,
+        Map&lt;String, String&gt; additionalQueryJobLabels,
+        QueryParameterHelper queryParameterHelper) {
+
+<span class="fc" id="L1288">      QueryJobConfiguration.Builder builder =</span>
+<span class="fc" id="L1289">          QueryJobConfiguration.newBuilder(querySql).setPriority(queryJobPriority);</span>
+
+<span class="fc" id="L1291">      queryParameterHelper.configureBuilder(builder);</span>
+
+<span class="fc" id="L1293">      Map&lt;String, String&gt; allLabels = new HashMap&lt;&gt;(additionalQueryJobLabels);</span>
+
+<span class="pc bpc" id="L1295" title="2 of 4 branches missed.">      if (labels != null &amp;&amp; !labels.isEmpty()) {</span>
+<span class="nc" id="L1296">        allLabels.putAll(labels);</span>
+      }
+
+<span class="fc" id="L1299">      builder.setLabels(allLabels);</span>
+<span class="fc" id="L1300">      return builder;</span>
+    }
+
+    LoadJobConfiguration.Builder createLoadJobConfigurationBuilder(
+        TableId tableId, List&lt;String&gt; sourceUris, FormatOptions formatOptions) {
+<span class="fc" id="L1305">      LoadJobConfiguration.Builder builder =</span>
+<span class="fc" id="L1306">          LoadJobConfiguration.newBuilder(tableId, sourceUris, formatOptions);</span>
+<span class="pc bpc" id="L1307" title="2 of 4 branches missed.">      if (labels != null &amp;&amp; !labels.isEmpty()) {</span>
+<span class="nc" id="L1308">        builder.setLabels(labels);</span>
+      }
+<span class="fc" id="L1310">      return builder;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

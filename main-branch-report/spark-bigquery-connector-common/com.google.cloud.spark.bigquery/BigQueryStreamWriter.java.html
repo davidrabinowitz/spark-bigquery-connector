@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryStreamWriter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery</a> &gt; <span class="el_source">BigQueryStreamWriter.java</span></div><h1>BigQueryStreamWriter.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2025 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery;
+
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.spark.bigquery.write.BigQueryWriteHelper;
+import com.google.common.collect.Streams;
+import java.util.Optional;
+import java.util.ServiceLoader;
+import org.apache.spark.rdd.RDD;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SQLContext;
+import org.apache.spark.sql.SaveMode;
+import org.apache.spark.sql.streaming.OutputMode;
+import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public final class BigQueryStreamWriter {
+
+<span class="nc" id="L36">  private static final Logger log = LoggerFactory.getLogger(BigQueryStreamWriter.class);</span>
+
+  private BigQueryStreamWriter() {}
+
+  /**
+   * Convert streaming dataframe to fixed dataframe by Getting partitioned RDD and mapping to Row
+   * dataframe
+   *
+   * @param data Streaming dataframe
+   * @param sqlContext Spark SQLContext
+   * @param opts Spark BigQuery Options
+   */
+  public static void writeBatch(
+      Dataset&lt;Row&gt; data,
+      SQLContext sqlContext,
+      OutputMode outputMode,
+      SparkBigQueryConfig opts,
+      BigQueryClient bigQueryClient) {
+<span class="nc" id="L54">    StructType schema = data.schema();</span>
+<span class="nc" id="L55">    String sparkVersion = sqlContext.sparkSession().version();</span>
+
+    // Assuming DataFrameToRDDConverter.convertToRDD returns RDD&lt;Row&gt;
+    // The original Scala code uses a polymorphic dispatch.
+    // In Java, this might involve an explicit cast or a generic type.
+<span class="nc" id="L60">    RDD&lt;Row&gt; rowRdd = dataFrameToRDDConverterFactory(sparkVersion).convertToRDD(data);</span>
+
+    // Create fixed dataframe
+<span class="nc" id="L63">    Dataset&lt;Row&gt; dataFrame = sqlContext.createDataFrame(rowRdd, schema);</span>
+<span class="nc" id="L64">    TableInfo table =</span>
+<span class="nc" id="L65">        bigQueryClient.getTable(opts.getTableId()); // returns Table, not Optional&lt;Table&gt;</span>
+<span class="nc" id="L66">    SaveMode saveMode = getSaveMode(outputMode);</span>
+
+<span class="nc" id="L68">    BigQueryWriteHelper helper =</span>
+        new BigQueryWriteHelper(
+<span class="nc" id="L70">            bigQueryClient, sqlContext, saveMode, opts, dataFrame, Optional.ofNullable(table));</span>
+<span class="nc" id="L71">    helper.writeDataFrameToBigQuery();</span>
+<span class="nc" id="L72">  }</span>
+
+  /**
+   * Convert Output mode to save mode Complete =&gt; Truncate Append =&gt; Append (Default) Update =&gt; Not
+   * yet supported
+   *
+   * @param outputMode
+   * @return SaveMode
+   * @throws UnsupportedOperationException
+   */
+  private static SaveMode getSaveMode(OutputMode outputMode) {
+<span class="nc bnc" id="L83" title="All 2 branches missed.">    if (outputMode.equals(OutputMode.Complete())) { // Use .equals() for object comparison</span>
+<span class="nc" id="L84">      return SaveMode.Overwrite;</span>
+<span class="nc bnc" id="L85" title="All 2 branches missed.">    } else if (outputMode.equals(OutputMode.Update())) {</span>
+<span class="nc" id="L86">      throw new UnsupportedOperationException(&quot;Updates are not yet supported&quot;);</span>
+    } else { // Append or other modes
+<span class="nc" id="L88">      return SaveMode.Append;</span>
+    }
+  }
+
+  public static DataFrameToRDDConverter dataFrameToRDDConverterFactory(String sparkVersion) {
+<span class="nc" id="L93">    ServiceLoader&lt;DataFrameToRDDConverter&gt; serviceLoader =</span>
+<span class="nc" id="L94">        ServiceLoader.load(DataFrameToRDDConverter.class);</span>
+<span class="nc" id="L95">    return Streams.stream(serviceLoader.iterator())</span>
+<span class="nc" id="L96">        .filter(converter -&gt; converter.supports(sparkVersion))</span>
+<span class="nc" id="L97">        .findFirst()</span>
+<span class="nc" id="L98">        .orElseThrow(</span>
+            () -&gt;
+<span class="nc" id="L100">                new IllegalStateException(</span>
+                    &quot;Could not find an implementation of &quot;
+<span class="nc" id="L102">                        + DataFrameToRDDConverter.class.getCanonicalName()));</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

@@ -1,0 +1,330 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SparkBigQueryUtil.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery</a> &gt; <span class="el_source">SparkBigQueryUtil.java</span></div><h1>SparkBigQueryUtil.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2020 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery;
+
+import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.DEFAULT_FALLBACK;
+import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getOptionFromMultipleParams;
+
+import com.google.cloud.bigquery.JobInfo;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil;
+import com.google.cloud.bigquery.connector.common.BigQueryUtil;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableMap.Builder;
+import com.google.common.collect.ImmutableSet;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.ServiceLoader;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+import javax.validation.constraints.NotNull;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.spark.SparkConf;
+import org.apache.spark.sql.SaveMode;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.internal.SQLConf;
+import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.types.Metadata;
+
+/** Spark related utilities */
+<span class="nc" id="L56">public class SparkBigQueryUtil {</span>
+
+  private static final String SPARK_YARN_TAGS = &quot;spark.yarn.tags&quot;;
+
+<span class="fc" id="L60">  private static final long MICROS_PER_SECOND = TimeUnit.SECONDS.toMicros(1);</span>
+<span class="fc" id="L61">  private static final long MIN_SECONDS = Math.floorDiv(Long.MIN_VALUE, MICROS_PER_SECOND);</span>
+
+<span class="fc" id="L63">  static final Properties BUILD_PROPERTIES = loadBuildProperties();</span>
+
+<span class="fc" id="L65">  static final String CONNECTOR_VERSION = BUILD_PROPERTIES.getProperty(&quot;connector.version&quot;);</span>
+
+  private static final ImmutableSet&lt;TypeConverter&gt; typeConverters;
+
+  static {
+<span class="fc" id="L70">    ServiceLoader&lt;TypeConverter&gt; serviceLoader = ServiceLoader.load(TypeConverter.class);</span>
+<span class="fc" id="L71">    typeConverters = ImmutableSet.copyOf(serviceLoader.iterator());</span>
+<span class="fc" id="L72">  }</span>
+
+  private static Properties loadBuildProperties() {
+    try {
+<span class="fc" id="L76">      Properties buildProperties = new Properties();</span>
+<span class="fc" id="L77">      buildProperties.load(</span>
+<span class="fc" id="L78">          SparkBigQueryUtil.class.getResourceAsStream(&quot;/spark-bigquery-connector.properties&quot;));</span>
+<span class="fc" id="L79">      return buildProperties;</span>
+<span class="nc" id="L80">    } catch (IOException e) {</span>
+<span class="nc" id="L81">      throw new UncheckedIOException(e);</span>
+    }
+  }
+
+  /**
+   * Optimizing the URI list for BigQuery load, using the Spark specific file prefix and suffix
+   * patterns, based on &lt;code&gt;BigQueryUtil.optimizeLoadUriList()&lt;/code&gt;
+   *
+   * @param uris A list of URIs to be loaded by BigQuery load
+   * @return an optimized list of URIs
+   */
+  public static List&lt;String&gt; optimizeLoadUriListForSpark(List&lt;String&gt; uris) {
+<span class="fc" id="L93">    return BigQueryUtil.optimizeLoadUriList(uris, &quot;.*/part-&quot;, &quot;-[-\\w\\.]+&quot;);</span>
+  }
+
+  /**
+   * Checks whether temporaryGcsBucket or persistentGcsBucket parameters are present in the config
+   * and creates a org.apache.hadoop.fs.Path object backed by GCS. When the indirect write method in
+   * dsv1 is used, the data is written first to this GCS path and is then loaded into BigQuery
+   *
+   * @param config SparkBigQueryConfig
+   * @param conf Hadoop configuration parameters
+   * @param applicationId A unique identifier for the Spark application
+   * @return org.apache.hadoop.fs.Path object backed by GCS
+   */
+  public static Path createGcsPath(
+      SparkBigQueryConfig config, Configuration conf, String applicationId) {
+    Path gcsPath;
+    try {
+<span class="fc" id="L110">      Preconditions.checkArgument(</span>
+<span class="pc bpc" id="L111" title="3 of 4 branches missed.">          config.getTemporaryGcsBucket().isPresent() || config.getPersistentGcsBucket().isPresent(),</span>
+          &quot;Either temporary or persistent GCS bucket must be set&quot;);
+
+      // Throw exception if persistentGcsPath already exists in persistentGcsBucket
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">      if (config.getPersistentGcsBucket().isPresent()</span>
+<span class="nc bnc" id="L116" title="All 2 branches missed.">          &amp;&amp; config.getPersistentGcsPath().isPresent()) {</span>
+<span class="nc" id="L117">        gcsPath =</span>
+            new Path(
+<span class="nc" id="L119">                String.format(</span>
+                    &quot;%s/%s&quot;,
+<span class="nc" id="L121">                    getBucketAndScheme(config.getPersistentGcsBucket().get()),</span>
+<span class="nc" id="L122">                    config.getPersistentGcsPath().get()));</span>
+<span class="nc" id="L123">        FileSystem fs = gcsPath.getFileSystem(conf);</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">        if (fs.exists(gcsPath)) {</span>
+<span class="nc" id="L125">          throw new IllegalArgumentException(</span>
+<span class="nc" id="L126">              String.format(</span>
+                  &quot;Path %s already exists in %s bucket&quot;,
+<span class="nc" id="L128">                  config.getPersistentGcsPath().get(), config.getPersistentGcsBucket().get()));</span>
+        }
+<span class="pc bpc" id="L130" title="1 of 2 branches missed.">      } else if (config.getTemporaryGcsBucket().isPresent()) {</span>
+<span class="fc" id="L131">        gcsPath = getUniqueGcsPath(config.getTemporaryGcsBucket().get(), applicationId, conf);</span>
+      } else {
+<span class="nc" id="L133">        gcsPath = getUniqueGcsPath(config.getPersistentGcsBucket().get(), applicationId, conf);</span>
+      }
+<span class="nc" id="L135">    } catch (IOException e) {</span>
+<span class="nc" id="L136">      throw new UncheckedIOException(e);</span>
+<span class="fc" id="L137">    }</span>
+<span class="fc" id="L138">    return gcsPath;</span>
+  }
+
+  private static Path getUniqueGcsPath(String gcsBucket, String applicationId, Configuration conf)
+      throws IOException {
+<span class="fc" id="L143">    boolean needNewPath = true;</span>
+<span class="fc" id="L144">    Path gcsPath = null;</span>
+<span class="fc" id="L145">    String gcsBucketAndScheme = getBucketAndScheme(gcsBucket);</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    while (needNewPath) {</span>
+<span class="fc" id="L147">      gcsPath =</span>
+          new Path(
+<span class="fc" id="L149">              String.format(</span>
+                  &quot;%s/.spark-bigquery-%s-%s&quot;,
+<span class="fc" id="L151">                  gcsBucketAndScheme, applicationId, UUID.randomUUID()));</span>
+<span class="fc" id="L152">      FileSystem fs = gcsPath.getFileSystem(conf);</span>
+<span class="fc" id="L153">      needNewPath = fs.exists(gcsPath);</span>
+<span class="fc" id="L154">    }</span>
+
+<span class="fc" id="L156">    return gcsPath;</span>
+  }
+
+  private static String getBucketAndScheme(String gcsBucket) {
+<span class="pc bpc" id="L160" title="1 of 2 branches missed.">    return gcsBucket.contains(&quot;://&quot;) ? gcsBucket : &quot;gs://&quot; + gcsBucket;</span>
+  }
+
+  public static String getJobId(SQLConf sqlConf) {
+<span class="fc" id="L164">    return getJobIdInternal(</span>
+<span class="fc" id="L165">        sqlConf.getConfString(&quot;spark.yarn.tags&quot;, &quot;missing&quot;),</span>
+<span class="fc" id="L166">        sqlConf.getConfString(&quot;spark.app.id&quot;, &quot;generated-&quot; + UUID.randomUUID()));</span>
+  }
+
+  @VisibleForTesting
+  // try to extract the dataproc job first, if not than use the applicationId
+  static String getJobIdInternal(String yarnTags, String applicationId) {
+<span class="fc" id="L172">    return Stream.of(yarnTags.split(&quot;,&quot;))</span>
+<span class="fc" id="L173">        .filter(tag -&gt; tag.startsWith(&quot;dataproc_job_&quot;))</span>
+<span class="fc" id="L174">        .findFirst()</span>
+<span class="fc" id="L175">        .orElseGet(() -&gt; applicationId);</span>
+  }
+
+  public static JobInfo.WriteDisposition saveModeToWriteDisposition(SaveMode saveMode) {
+<span class="pc bpc" id="L179" title="1 of 2 branches missed.">    if (saveMode == SaveMode.ErrorIfExists) {</span>
+<span class="nc" id="L180">      return JobInfo.WriteDisposition.WRITE_EMPTY;</span>
+    }
+    // SaveMode.Ignore is handled in the data source level. If it has arrived here it means tha
+    // table does not exist
+<span class="pc bpc" id="L184" title="1 of 4 branches missed.">    if (saveMode == SaveMode.Append || saveMode == SaveMode.Ignore) {</span>
+<span class="fc" id="L185">      return JobInfo.WriteDisposition.WRITE_APPEND;</span>
+    }
+<span class="pc bpc" id="L187" title="1 of 2 branches missed.">    if (saveMode == SaveMode.Overwrite) {</span>
+<span class="fc" id="L188">      return JobInfo.WriteDisposition.WRITE_TRUNCATE;</span>
+    }
+<span class="nc" id="L190">    throw new IllegalArgumentException(&quot;SaveMode &quot; + saveMode + &quot; is currently not supported.&quot;);</span>
+  }
+
+  public static TableId parseSimpleTableId(SparkSession spark, Map&lt;String, String&gt; options) {
+<span class="nc" id="L194">    ImmutableMap&lt;String, String&gt; globalOptions =</span>
+<span class="nc" id="L195">        ImmutableMap.copyOf(scalaMapToJavaMap(spark.conf().getAll()));</span>
+<span class="nc" id="L196">    return BigQueryConfigurationUtil.parseSimpleTableId(globalOptions, options);</span>
+  }
+
+  public static long sparkTimestampToBigQuery(Object sparkValue) {
+<span class="pc bpc" id="L200" title="1 of 2 branches missed.">    if (sparkValue instanceof Long) {</span>
+<span class="nc" id="L201">      return ((Number) sparkValue).longValue();</span>
+    }
+
+<span class="pc bpc" id="L204" title="1 of 2 branches missed.">    if (sparkValue instanceof Instant) {</span>
+<span class="nc" id="L205">      Instant instant = (Instant) sparkValue;</span>
+<span class="nc" id="L206">      long epochSeconds = instant.getEpochSecond();</span>
+<span class="nc bnc" id="L207" title="All 2 branches missed.">      if (epochSeconds == MIN_SECONDS) {</span>
+<span class="nc" id="L208">        long us = Math.multiplyExact(epochSeconds + 1, MICROS_PER_SECOND);</span>
+<span class="nc" id="L209">        return Math.addExact(</span>
+<span class="nc" id="L210">            us, TimeUnit.NANOSECONDS.toMicros(instant.getNano()) - MICROS_PER_SECOND);</span>
+      } else {
+<span class="nc" id="L212">        long us = Math.multiplyExact(epochSeconds, MICROS_PER_SECOND);</span>
+<span class="nc" id="L213">        return Math.addExact(us, TimeUnit.NANOSECONDS.toMicros(instant.getNano()));</span>
+      }
+    }
+
+    // need to return timestamp in epoch microseconds
+<span class="fc" id="L218">    java.sql.Timestamp timestamp = (java.sql.Timestamp) sparkValue;</span>
+<span class="fc" id="L219">    long epochMillis = timestamp.getTime();</span>
+<span class="fc" id="L220">    int micros = (timestamp.getNanos() / 1000) % 1000;</span>
+<span class="fc" id="L221">    return epochMillis * 1000 + micros;</span>
+  }
+
+  public static int sparkDateToBigQuery(Object sparkValue) {
+<span class="pc bpc" id="L225" title="1 of 2 branches missed.">    if (sparkValue instanceof Number) {</span>
+<span class="nc" id="L226">      return ((Number) sparkValue).intValue();</span>
+    }
+
+<span class="pc bpc" id="L229" title="1 of 2 branches missed.">    if (sparkValue instanceof LocalDate) {</span>
+<span class="nc" id="L230">      LocalDate localDate = (LocalDate) sparkValue;</span>
+<span class="nc" id="L231">      return Math.toIntExact(localDate.toEpochDay());</span>
+    }
+
+<span class="fc" id="L234">    java.sql.Date sparkDate = (java.sql.Date) sparkValue;</span>
+<span class="fc" id="L235">    return (int) sparkDate.toLocalDate().toEpochDay();</span>
+  }
+
+  public static String getTableNameFromOptions(Map&lt;String, String&gt; options) {
+    // options.get(&quot;table&quot;) when the &quot;table&quot; option is used, options.get(&quot;path&quot;) is set when
+    // .load(&quot;table_name) is used
+<span class="nc" id="L241">    Optional&lt;String&gt; tableParam =</span>
+<span class="nc" id="L242">        getOptionFromMultipleParams(options, ImmutableList.of(&quot;table&quot;, &quot;path&quot;), DEFAULT_FALLBACK)</span>
+<span class="nc" id="L243">            .toJavaUtil();</span>
+<span class="nc" id="L244">    String tableParamStr = tableParam.get().trim().replaceAll(&quot;\\s+&quot;, &quot; &quot;);</span>
+<span class="nc" id="L245">    TableId tableId = BigQueryUtil.parseTableId(tableParamStr);</span>
+<span class="nc" id="L246">    return BigQueryUtil.friendlyTableName(tableId);</span>
+  }
+
+  // scala version agnostic conversion, that's why no JavaConverters are used
+  public static &lt;K, V&gt; ImmutableMap&lt;K, V&gt; scalaMapToJavaMap(
+      scala.collection.immutable.Map&lt;K, V&gt; map) {
+<span class="fc" id="L252">    ImmutableMap.Builder&lt;K, V&gt; result = ImmutableMap.&lt;K, V&gt;builder();</span>
+<span class="fc" id="L253">    scala.collection.Iterator&lt;scala.Tuple2&lt;K, V&gt;&gt; iterator = map.iterator();</span>
+<span class="fc bfc" id="L254" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L255">      scala.Tuple2&lt;K, V&gt; entry = iterator.next();</span>
+<span class="fc" id="L256">      result.put(entry._1(), entry._2());</span>
+<span class="fc" id="L257">    }</span>
+<span class="fc" id="L258">    return result.build();</span>
+  }
+
+  public static boolean isDataFrameShowMethodInStackTrace() {
+<span class="nc bnc" id="L262" title="All 2 branches missed.">    for (StackTraceElement stackTraceElement : Thread.currentThread().getStackTrace()) {</span>
+<span class="nc bnc" id="L263" title="All 2 branches missed.">      if (stackTraceElement.getClassName().equals(&quot;org.apache.spark.sql.Dataset&quot;)</span>
+<span class="nc bnc" id="L264" title="All 2 branches missed.">          &amp;&amp; stackTraceElement.getMethodName().equals(&quot;showString&quot;)) {</span>
+<span class="nc" id="L265">        return true;</span>
+      }
+    }
+
+<span class="nc" id="L269">    return false;</span>
+  }
+
+  public static boolean isJson(Metadata metadata) {
+<span class="pc bpc" id="L273" title="1 of 4 branches missed.">    return metadata.contains(&quot;sqlType&quot;) &amp;&amp; &quot;JSON&quot;.equals(metadata.getString(&quot;sqlType&quot;));</span>
+  }
+
+  public static ImmutableList&lt;Filter&gt; extractPartitionAndClusteringFilters(
+      TableInfo table, ImmutableList&lt;Filter&gt; filters) {
+
+<span class="nc" id="L279">    ImmutableList&lt;String&gt; partitionFields = BigQueryUtil.getPartitionFields(table);</span>
+<span class="nc" id="L280">    ImmutableList&lt;String&gt; clusteringFields = BigQueryUtil.getClusteringFields(table);</span>
+
+<span class="nc" id="L282">    ImmutableList.Builder&lt;String&gt; filterFields = ImmutableList.builder();</span>
+<span class="nc" id="L283">    filterFields.addAll(partitionFields);</span>
+<span class="nc" id="L284">    filterFields.addAll(clusteringFields);</span>
+
+<span class="nc" id="L286">    return filterFields.build().stream()</span>
+<span class="nc" id="L287">        .flatMap(field -&gt; filtersOnField(filters, field))</span>
+<span class="nc" id="L288">        .collect(ImmutableList.toImmutableList());</span>
+  }
+
+  @VisibleForTesting
+  static Stream&lt;Filter&gt; filtersOnField(ImmutableList&lt;Filter&gt; filters, String field) {
+<span class="nc" id="L293">    return filters.stream()</span>
+<span class="nc" id="L294">        .filter(</span>
+            filter -&gt;
+<span class="nc" id="L296">                Stream.of(filter.references()).anyMatch(reference -&gt; reference.equals(field)));</span>
+  }
+
+  public static Stream&lt;TypeConverter&gt; getTypeConverterStream() {
+<span class="fc" id="L300">    return typeConverters.stream();</span>
+  }
+
+  @NotNull
+  public static ImmutableMap&lt;String, String&gt; extractJobLabels(SparkConf sparkConf) {
+<span class="fc" id="L305">    Builder&lt;String, String&gt; labels = ImmutableMap.builder();</span>
+<span class="fc" id="L306">    ImmutableList&lt;String&gt; tags =</span>
+<span class="fc" id="L307">        Stream.of(Optional.ofNullable(sparkConf.get(SPARK_YARN_TAGS, null)))</span>
+<span class="fc" id="L308">            .filter(Optional::isPresent)</span>
+<span class="pc" id="L309">            .flatMap(value -&gt; Stream.of(value.get().split(&quot;,&quot;)))</span>
+<span class="fc" id="L310">            .collect(ImmutableList.toImmutableList());</span>
+<span class="fc" id="L311">    tags.stream()</span>
+<span class="pc" id="L312">        .filter(tag -&gt; tag.startsWith(&quot;dataproc_job_&quot;))</span>
+<span class="fc" id="L313">        .findFirst()</span>
+<span class="fc" id="L314">        .ifPresent(</span>
+            tag -&gt;
+<span class="nc" id="L316">                labels.put(</span>
+                    &quot;dataproc_job_id&quot;,
+<span class="nc" id="L318">                    BigQueryUtil.sanitizeLabelValue(tag.substring(tag.lastIndexOf('_') + 1))));</span>
+<span class="fc" id="L319">    tags.stream()</span>
+<span class="pc" id="L320">        .filter(tag -&gt; tag.startsWith(&quot;dataproc_uuid_&quot;))</span>
+<span class="fc" id="L321">        .findFirst()</span>
+<span class="fc" id="L322">        .ifPresent(</span>
+            tag -&gt;
+<span class="nc" id="L324">                labels.put(</span>
+                    &quot;dataproc_job_uuid&quot;,
+<span class="nc" id="L326">                    BigQueryUtil.sanitizeLabelValue(tag.substring(tag.lastIndexOf('_') + 1))));</span>
+<span class="fc" id="L327">    return labels.build();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

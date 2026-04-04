@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryRDDFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.direct</a> &gt; <span class="el_source">BigQueryRDDFactory.java</span></div><h1>BigQueryRDDFactory.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.cloud.spark.bigquery.direct;
+
+import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.Schema;
+import com.google.cloud.bigquery.StandardTableDefinition;
+import com.google.cloud.bigquery.TableDefinition;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.bigquery.connector.common.BigQueryClientFactory;
+import com.google.cloud.bigquery.connector.common.BigQueryConnectorException;
+import com.google.cloud.bigquery.connector.common.BigQueryTracerFactory;
+import com.google.cloud.bigquery.connector.common.BigQueryUtil;
+import com.google.cloud.bigquery.connector.common.ParameterMode;
+import com.google.cloud.bigquery.connector.common.QueryParameterHelper;
+import com.google.cloud.bigquery.connector.common.ReadSessionCreator;
+import com.google.cloud.bigquery.connector.common.ReadSessionResponse;
+import com.google.cloud.bigquery.storage.v1.ReadSession;
+import com.google.cloud.spark.bigquery.SchemaConverters;
+import com.google.cloud.spark.bigquery.SchemaConvertersConfiguration;
+import com.google.cloud.spark.bigquery.SparkBigQueryConfig;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Streams;
+import java.lang.reflect.Constructor;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import org.apache.spark.Partition;
+import org.apache.spark.SparkContext;
+import org.apache.spark.rdd.RDD;
+import org.apache.spark.sql.SQLContext;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Wrapper class for generating BigQueryRDD. Extracted this logic out so that we can reuse it from
+ * 1) Dsv1 buildScan 2) Dsv1 pushdown functionality 3) Dsv2 pushdown functionality
+ */
+public class BigQueryRDDFactory {
+
+<span class="fc" id="L61">  private static final Logger log = LoggerFactory.getLogger(BigQueryRDDFactory.class);</span>
+
+  private static final String QUERY_JOB_LABEL = &quot;query_source&quot;;
+  private static final String QUERY_PUSHDOWN_JOB_LABEL_VALUE = &quot;spark_query_pushdown&quot;;
+
+  private final BigQueryClient bigQueryClient;
+  private final SparkBigQueryConfig options;
+  private final BigQueryClientFactory bigQueryReadClientFactory;
+  private final BigQueryTracerFactory bigQueryTracerFactory;
+  private final SQLContext sqlContext;
+
+  public BigQueryRDDFactory(
+      BigQueryClient bigQueryClient,
+      BigQueryClientFactory bigQueryReadClientFactory,
+      BigQueryTracerFactory bigQueryTracerFactory,
+      SparkBigQueryConfig options,
+<span class="fc" id="L77">      SQLContext sqlContext) {</span>
+<span class="fc" id="L78">    this.bigQueryClient = bigQueryClient;</span>
+<span class="fc" id="L79">    this.options = options;</span>
+<span class="fc" id="L80">    this.bigQueryReadClientFactory = bigQueryReadClientFactory;</span>
+<span class="fc" id="L81">    this.bigQueryTracerFactory = bigQueryTracerFactory;</span>
+<span class="fc" id="L82">    this.sqlContext = sqlContext;</span>
+<span class="fc" id="L83">  }</span>
+
+  /**
+   * Creates RDD from the SQL string that is passed in. This functionality is invoked from the query
+   * pushdown module
+   */
+  public RDD&lt;InternalRow&gt; buildScanFromSQL(String sql) {
+<span class="nc" id="L90">    log.info(&quot;Materializing the following sql query to a BigQuery table: {}&quot;, sql);</span>
+
+<span class="nc" id="L92">    TableInfo actualTable =</span>
+<span class="nc" id="L93">        bigQueryClient.materializeQueryToTable(</span>
+            sql,
+<span class="nc" id="L95">            options.getMaterializationExpirationTimeInMinutes(),</span>
+            // Label to add to Query Job indicating that it was invoked as part of query pushdown
+<span class="nc" id="L97">            ImmutableMap.&lt;String, String&gt;builder()</span>
+<span class="nc" id="L98">                .put(QUERY_JOB_LABEL, QUERY_PUSHDOWN_JOB_LABEL_VALUE)</span>
+<span class="nc" id="L99">                .build(),</span>
+            new QueryParameterHelper(ParameterMode.NONE, null, null));
+
+<span class="nc" id="L102">    TableDefinition actualTableDefinition = actualTable.getDefinition();</span>
+
+    // We do require requiredColumns to be passed in for pushdown. If we don't, an
+    // ArrayIndexOutOfBounds
+    // exception is thrown
+<span class="nc" id="L107">    List&lt;String&gt; requiredColumns =</span>
+<span class="nc" id="L108">        actualTableDefinition.getSchema().getFields().stream()</span>
+<span class="nc" id="L109">            .map(Field::getName)</span>
+<span class="nc" id="L110">            .collect(Collectors.toList());</span>
+
+<span class="nc" id="L112">    log.info(</span>
+        &quot;Querying table {}, requiredColumns=[{}]&quot;,
+<span class="nc" id="L114">        actualTable.getTableId().getProject()</span>
+            + &quot;:&quot;
+<span class="nc" id="L116">            + actualTable.getTableId().getDataset()</span>
+            + &quot;:&quot;
+<span class="nc" id="L118">            + actualTable.getTableId().getTable(),</span>
+<span class="nc" id="L119">        requiredColumns.toString());</span>
+
+<span class="nc" id="L121">    ReadSessionCreator readSessionCreator =</span>
+        new ReadSessionCreator(
+<span class="nc" id="L123">            options.toReadSessionCreatorConfig(), bigQueryClient, bigQueryReadClientFactory);</span>
+
+<span class="nc" id="L125">    return (RDD&lt;InternalRow&gt;)</span>
+<span class="nc" id="L126">        createRddFromTable(</span>
+<span class="nc" id="L127">            actualTable.getTableId(),</span>
+            readSessionCreator,
+<span class="nc" id="L129">            requiredColumns.toArray(new String[0]),</span>
+            &quot;&quot;);
+  }
+
+  // Creates BigQueryRDD from the BigQuery table that is passed in. Note that we return RDD&lt;?&gt;
+  // instead of BigQueryRDD or RDD&lt;InternalRow&gt;. This is because the casting rules in Java are a lot
+  // stricter than Java due to which we cannot go from RDD&lt;InternalRow&gt; to RDD&lt;Row&gt;
+  public RDD&lt;?&gt; createRddFromTable(
+      TableId tableId,
+      ReadSessionCreator readSessionCreator,
+      String[] requiredColumns,
+      String filter) {
+<span class="nc" id="L141">    ReadSessionResponse readSessionResponse =</span>
+<span class="nc" id="L142">        readSessionCreator.create(</span>
+<span class="nc" id="L143">            tableId, ImmutableList.copyOf(requiredColumns), BigQueryUtil.emptyIfNeeded(filter));</span>
+<span class="nc" id="L144">    ReadSession readSession = readSessionResponse.getReadSession();</span>
+<span class="nc" id="L145">    TableInfo actualTable = readSessionResponse.getReadTableInfo();</span>
+
+<span class="nc" id="L147">    List&lt;BigQueryPartition&gt; partitions =</span>
+<span class="nc" id="L148">        Streams.mapWithIndex(</span>
+<span class="nc" id="L149">                readSession.getStreamsList().stream(),</span>
+                (readStream, index) -&gt;
+<span class="nc" id="L151">                    new BigQueryPartition(readStream.getName(), Math.toIntExact(index)))</span>
+<span class="nc" id="L152">            .collect(Collectors.toList());</span>
+
+<span class="nc" id="L154">    log.info(</span>
+        &quot;Created read session for table '{}': {}&quot;,
+<span class="nc" id="L156">        BigQueryUtil.friendlyTableName(tableId),</span>
+<span class="nc" id="L157">        readSession.getName());</span>
+
+<span class="nc" id="L159">    Set&lt;String&gt; requiredColumnSet = Stream.of(requiredColumns).collect(Collectors.toSet());</span>
+<span class="nc" id="L160">    Schema prunedSchema =</span>
+<span class="nc" id="L161">        Schema.of(</span>
+<span class="nc" id="L162">            SchemaConverters.from(SchemaConvertersConfiguration.from(options))</span>
+<span class="nc" id="L163">                .getSchemaWithPseudoColumns(actualTable).getFields().stream()</span>
+<span class="nc" id="L164">                .filter(f -&gt; requiredColumnSet.contains(f.getName()))</span>
+<span class="nc" id="L165">                .collect(Collectors.toList()));</span>
+
+<span class="nc" id="L167">    return createRDD(</span>
+        sqlContext,
+<span class="nc" id="L169">        partitions.toArray(new BigQueryPartition[0]),</span>
+        readSession,
+        prunedSchema,
+        requiredColumns,
+        options,
+        bigQueryReadClientFactory,
+        bigQueryTracerFactory);
+  }
+
+  // Moved from BigQueryRDD.scanTable
+  @VisibleForTesting
+  RDD&lt;InternalRow&gt; createRDD(
+      SQLContext sqlContext,
+      Partition[] partitions,
+      ReadSession readSession,
+      Schema bqSchema,
+      String[] columnsInOrder,
+      SparkBigQueryConfig options,
+      BigQueryClientFactory bigQueryClientFactory,
+      BigQueryTracerFactory bigQueryTracerFactory) {
+    // Unfortunately we need to use reflection here due to a cyclic dependency issue, and the fact
+    // that RDD constructor dependencies are different between Scala 2.12 and Scala 2.13. In Scala
+    // 2.13 `scala.collection.Seq` is mapped to `scala.collection.immutable.Seq` and this is why we
+    // need two classes each compiled against different Scala version.
+    //
+    // The BigQueryRDD implementations have a compilation dependency on BigQueryPartition (of this
+    // project), while the BigQueryRDDFactory need to initialize them, so we have a cyclic
+    // dependency. In order to solve it, we use reflection to dynamically load the appropriate
+    // BigQueryRDD version.
+<span class="nc" id="L198">    String bigQueryRDDClassName = &quot;com.google.cloud.spark.bigquery.direct.Scala213BigQueryRDD&quot;;</span>
+<span class="nc" id="L199">    String scalaVersion = scala.util.Properties.versionNumberString();</span>
+<span class="nc bnc" id="L200" title="All 2 branches missed.">    if (scalaVersion.compareTo(&quot;2.13&quot;) &lt; 0) {</span>
+      // Run uses Scala 2.11/2.12
+<span class="nc" id="L202">      bigQueryRDDClassName = &quot;com.google.cloud.spark.bigquery.direct.PreScala213BigQueryRDD&quot;;</span>
+    }
+    try {
+<span class="nc" id="L205">      Class&lt;? extends RDD&lt;InternalRow&gt;&gt; clazz =</span>
+<span class="nc" id="L206">          (Class&lt;? extends RDD&lt;InternalRow&gt;&gt;) Class.forName(bigQueryRDDClassName);</span>
+<span class="nc" id="L207">      Constructor&lt;? extends RDD&lt;InternalRow&gt;&gt; constructor =</span>
+<span class="nc" id="L208">          clazz.getConstructor(SparkContext.class, BigQueryRDDContext.class);</span>
+
+<span class="nc" id="L210">      RDD&lt;InternalRow&gt; bigQueryRDD =</span>
+<span class="nc" id="L211">          constructor.newInstance(</span>
+<span class="nc" id="L212">              sqlContext.sparkContext(),</span>
+              new BigQueryRDDContext(
+                  partitions,
+                  readSession,
+                  bqSchema,
+                  columnsInOrder,
+                  options,
+                  bigQueryClientFactory,
+                  bigQueryTracerFactory));
+
+<span class="nc" id="L222">      return bigQueryRDD;</span>
+<span class="nc" id="L223">    } catch (Exception e) {</span>
+<span class="nc" id="L224">      throw new BigQueryConnectorException(</span>
+<span class="nc" id="L225">          String.format(</span>
+              &quot;Could not initialize a BigQuery RDD class of type [%s}&quot;, bigQueryRDDClassName),
+          e);
+    }
+  }
+
+  public long getNumBytes(TableDefinition tableDefinition) {
+<span class="nc" id="L232">    TableDefinition.Type tableType = tableDefinition.getType();</span>
+<span class="nc bnc" id="L233" title="All 2 branches missed.">    if (TableDefinition.Type.EXTERNAL == tableType</span>
+<span class="nc bnc" id="L234" title="All 6 branches missed.">        || (options.isViewsEnabled()</span>
+            &amp;&amp; (TableDefinition.Type.VIEW == tableType
+                || TableDefinition.Type.MATERIALIZED_VIEW == tableType))) {
+<span class="nc" id="L237">      return sqlContext.sparkSession().sessionState().conf().defaultSizeInBytes();</span>
+    } else {
+<span class="nc" id="L239">      StandardTableDefinition standardTableDefinition = (StandardTableDefinition) tableDefinition;</span>
+<span class="nc" id="L240">      return standardTableDefinition.getNumBytes();</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

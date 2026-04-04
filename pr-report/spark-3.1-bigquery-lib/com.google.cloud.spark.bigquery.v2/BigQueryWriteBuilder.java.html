@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryWriteBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-3.1-bigquery-lib</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.v2</a> &gt; <span class="el_source">BigQueryWriteBuilder.java</span></div><h1>BigQueryWriteBuilder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2021 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.v2;
+
+import com.google.cloud.spark.bigquery.write.context.DataSourceWriterContext;
+import com.google.inject.Injector;
+import java.util.Optional;
+import org.apache.spark.sql.SaveMode;
+import org.apache.spark.sql.connector.write.BatchWrite;
+import org.apache.spark.sql.connector.write.LogicalWriteInfo;
+import org.apache.spark.sql.connector.write.SupportsOverwrite;
+import org.apache.spark.sql.connector.write.WriteBuilder;
+import org.apache.spark.sql.connector.write.streaming.StreamingWrite;
+import org.apache.spark.sql.sources.Filter;
+
+public class BigQueryWriteBuilder implements WriteBuilder, SupportsOverwrite {
+  protected final Injector injector;
+  protected final LogicalWriteInfo info;
+  protected final SaveMode mode;
+
+  @Override
+  public StreamingWrite buildForStreaming() {
+<span class="fc" id="L36">    Optional&lt;DataSourceWriterContext&gt; dataSourceWriterContext =</span>
+<span class="fc" id="L37">        DataSourceWriterContext.create(</span>
+<span class="fc" id="L38">            injector, info.queryId(), info.schema(), mode, info.options());</span>
+<span class="fc" id="L39">    return new BigQueryStreamingWrite(dataSourceWriterContext.get());</span>
+  }
+
+<span class="fc" id="L42">  public BigQueryWriteBuilder(Injector injector, LogicalWriteInfo info, SaveMode mode) {</span>
+<span class="fc" id="L43">    this.injector = injector;</span>
+<span class="fc" id="L44">    this.info = info;</span>
+<span class="fc" id="L45">    this.mode = mode;</span>
+<span class="fc" id="L46">  }</span>
+
+  @Override
+  public BatchWrite buildForBatch() {
+<span class="nc" id="L50">    Optional&lt;DataSourceWriterContext&gt; dataSourceWriterContext =</span>
+<span class="nc" id="L51">        DataSourceWriterContext.create(</span>
+<span class="nc" id="L52">            injector, info.queryId(), info.schema(), mode, info.options());</span>
+<span class="nc" id="L53">    return new BigQueryBatchWrite(dataSourceWriterContext.get());</span>
+  }
+
+  @Override
+  public WriteBuilder overwrite(Filter[] filters) {
+<span class="nc" id="L58">    return null;</span>
+  }
+
+  @Override
+  public WriteBuilder truncate() {
+<span class="nc" id="L63">    return new BigQueryWriteBuilder(injector, info, SaveMode.Overwrite);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SparkBigQueryProxyAndHttpConfig.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery</a> &gt; <span class="el_source">SparkBigQueryProxyAndHttpConfig.java</span></div><h1>SparkBigQueryProxyAndHttpConfig.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery;
+
+import static com.google.cloud.bigquery.connector.common.BigQueryUtil.firstPresent;
+import static com.google.common.base.Optional.fromJavaUtil;
+import static com.google.common.base.Optional.fromNullable;
+import static com.google.common.base.Preconditions.checkArgument;
+
+import com.google.cloud.bigquery.connector.common.BigQueryProxyConfig;
+import com.google.cloud.bigquery.connector.common.BigQueryProxyTransporterBuilder;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Objects;
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
+import java.io.Serializable;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Map;
+import java.util.Optional;
+import org.apache.hadoop.conf.Configuration;
+
+public class SparkBigQueryProxyAndHttpConfig implements BigQueryProxyConfig, Serializable {
+
+  // HTTP proxy with address in host:port format
+  public static final String PROXY_ADDRESS_OPTION = &quot;proxyAddress&quot;;
+  public static final String PROXY_USERNAME_OPTION = &quot;proxyUsername&quot;;
+  public static final String PROXY_PASSWORD_OPTION = &quot;proxyPassword&quot;;
+  public static final String HTTP_MAX_RETRY_OPTION = &quot;httpMaxRetry&quot;;
+  public static final String HTTP_CONNECT_TIMEOUT_OPTION = &quot;httpConnectTimeout&quot;;
+  public static final String HTTP_READ_TIMEOUT_OPTION = &quot;httpReadTimeout&quot;;
+
+  // HTTP proxy with address in host:port format
+  public static final String GCS_CONFIG_PROXY_ADDRESS_PROPERTY = &quot;fs.gs.proxy.address&quot;;
+  public static final String GCS_CONFIG_PROXY_USERNAME_PROPERTY = &quot;fs.gs.proxy.username&quot;;
+  public static final String GCS_CONFIG_PROXY_PASSWORD_PROPERTY = &quot;fs.gs.proxy.password&quot;;
+  public static final String GCS_CONFIG_HTTP_MAX_RETRY_PROPERTY = &quot;fs.gs.http.max.retry&quot;;
+  public static final String GCS_CONFIG_HTTP_CONNECT_TIMEOUT_PROPERTY =
+      &quot;fs.gs.http.connect-timeout&quot;;
+  public static final String GCS_CONFIG_HTTP_READ_TIMEOUT_PROPERTY = &quot;fs.gs.http.read-timeout&quot;;
+  private static final long serialVersionUID = 1651319822547810178L;
+
+  private com.google.common.base.Optional&lt;URI&gt; proxyUri;
+  private com.google.common.base.Optional&lt;String&gt; proxyUsername;
+  private com.google.common.base.Optional&lt;String&gt; proxyPassword;
+  private com.google.common.base.Optional&lt;Integer&gt; httpMaxRetry;
+  private com.google.common.base.Optional&lt;Integer&gt; httpConnectTimeout;
+  private com.google.common.base.Optional&lt;Integer&gt; httpReadTimeout;
+
+  @VisibleForTesting
+<span class="fc" id="L64">  SparkBigQueryProxyAndHttpConfig() {</span>
+    // empty
+<span class="fc" id="L66">  }</span>
+
+  @VisibleForTesting
+  public static SparkBigQueryProxyAndHttpConfig from(
+      Map&lt;String, String&gt; options,
+      ImmutableMap&lt;String, String&gt; globalOptions,
+      Configuration hadoopConfiguration)
+      throws IllegalArgumentException {
+<span class="fc" id="L74">    SparkBigQueryProxyAndHttpConfig config = new SparkBigQueryProxyAndHttpConfig();</span>
+
+<span class="fc" id="L76">    com.google.common.base.Optional&lt;String&gt; proxyAddress =</span>
+<span class="fc" id="L77">        getProperty(</span>
+            options,
+            globalOptions,
+            hadoopConfiguration,
+            PROXY_ADDRESS_OPTION,
+            GCS_CONFIG_PROXY_ADDRESS_PROPERTY);
+<span class="fc" id="L83">    config.proxyUri = fromNullable(parseProxyAddress(proxyAddress.or(&quot;&quot;)));</span>
+<span class="fc" id="L84">    config.proxyUsername =</span>
+<span class="fc" id="L85">        getProperty(</span>
+            options,
+            globalOptions,
+            hadoopConfiguration,
+            PROXY_USERNAME_OPTION,
+            GCS_CONFIG_PROXY_USERNAME_PROPERTY);
+<span class="fc" id="L91">    config.proxyPassword =</span>
+<span class="fc" id="L92">        getProperty(</span>
+            options,
+            globalOptions,
+            hadoopConfiguration,
+            PROXY_PASSWORD_OPTION,
+            GCS_CONFIG_PROXY_PASSWORD_PROPERTY);
+<span class="fc" id="L98">    checkProxyParamsValidity(config);</span>
+
+<span class="fc" id="L100">    config.httpMaxRetry =</span>
+<span class="fc" id="L101">        getProperty(</span>
+                options,
+                globalOptions,
+                hadoopConfiguration,
+                HTTP_MAX_RETRY_OPTION,
+                GCS_CONFIG_HTTP_MAX_RETRY_PROPERTY)
+<span class="fc" id="L107">            .transform(Integer::valueOf);</span>
+<span class="fc" id="L108">    config.httpConnectTimeout =</span>
+<span class="fc" id="L109">        getProperty(</span>
+                options,
+                globalOptions,
+                hadoopConfiguration,
+                HTTP_CONNECT_TIMEOUT_OPTION,
+                GCS_CONFIG_HTTP_CONNECT_TIMEOUT_PROPERTY)
+<span class="fc" id="L115">            .transform(Integer::valueOf);</span>
+<span class="fc" id="L116">    config.httpReadTimeout =</span>
+<span class="fc" id="L117">        getProperty(</span>
+                options,
+                globalOptions,
+                hadoopConfiguration,
+                HTTP_READ_TIMEOUT_OPTION,
+                GCS_CONFIG_HTTP_READ_TIMEOUT_PROPERTY)
+<span class="fc" id="L123">            .transform(Integer::valueOf);</span>
+<span class="fc" id="L124">    checkHttpParamsValidity(config);</span>
+
+<span class="fc" id="L126">    return config;</span>
+  }
+
+  private static void checkProxyParamsValidity(SparkBigQueryProxyAndHttpConfig config)
+      throws IllegalArgumentException {
+<span class="pc bpc" id="L131" title="1 of 2 branches missed.">    if (!config.proxyUri.isPresent()</span>
+<span class="pc bpc" id="L132" title="2 of 4 branches missed.">        &amp;&amp; (config.proxyUsername.isPresent() || config.proxyPassword.isPresent())) {</span>
+<span class="nc" id="L133">      throw new IllegalArgumentException(</span>
+          &quot;Please set proxyAddress in order to use a proxy. &quot;
+              + &quot;Setting proxyUsername or proxyPassword is not enough&quot;);
+    }
+
+<span class="fc" id="L138">    BigQueryProxyTransporterBuilder.checkProxyParamsValidity(</span>
+<span class="fc" id="L139">        config.getProxyUsername(), config.getProxyPassword());</span>
+<span class="fc" id="L140">  }</span>
+
+  private static void checkHttpParamsValidity(SparkBigQueryProxyAndHttpConfig config)
+      throws IllegalArgumentException {
+    // Not checking for httpConnectTimeout and httpReadTimeout as negative values are allowed for
+    // these parameters.
+    // A negative number is for the default value (20000). And 0 for an infinite timeout.
+<span class="pc bpc" id="L147" title="3 of 4 branches missed.">    if (config.getHttpMaxRetry().isPresent() &amp;&amp; config.getHttpMaxRetry().get() &lt; 0) {</span>
+<span class="nc" id="L148">      throw new IllegalArgumentException(&quot;Http Max Retry value cannot be negative&quot;);</span>
+    }
+<span class="fc" id="L150">  }</span>
+
+  private static com.google.common.base.Optional&lt;String&gt; getProperty(
+      Map&lt;String, String&gt; options,
+      ImmutableMap&lt;String, String&gt; globalOptions,
+      Configuration hadoopConfiguration,
+      String bqOption,
+      String gcsProperty) {
+<span class="fc" id="L158">    return fromJavaUtil(</span>
+<span class="fc" id="L159">        firstPresent(</span>
+<span class="fc" id="L160">            getFirstOrSecondOption(options, globalOptions, bqOption).toJavaUtil(),</span>
+<span class="fc" id="L161">            fromNullable(hadoopConfiguration.get(gcsProperty)).toJavaUtil()));</span>
+  }
+
+  private static com.google.common.base.Optional&lt;String&gt; getFirstOrSecondOption(
+      Map&lt;String, String&gt; options, ImmutableMap&lt;String, String&gt; globalOptions, String name) {
+<span class="fc" id="L166">    return com.google.common.base.Optional.fromNullable(options.get(name.toLowerCase()))</span>
+<span class="fc" id="L167">        .or(com.google.common.base.Optional.fromNullable(globalOptions.get(name)));</span>
+  }
+
+  @VisibleForTesting
+  static URI parseProxyAddress(String proxyAddress) {
+<span class="pc bpc" id="L172" title="1 of 2 branches missed.">    if (Strings.isNullOrEmpty(proxyAddress)) {</span>
+<span class="fc" id="L173">      return null;</span>
+    }
+<span class="nc bnc" id="L175" title="All 2 branches missed.">    String uriString = (proxyAddress.contains(&quot;//&quot;) ? &quot;&quot; : &quot;//&quot;) + proxyAddress;</span>
+    try {
+<span class="nc" id="L177">      URI uri = new URI(uriString);</span>
+<span class="nc" id="L178">      String scheme = uri.getScheme();</span>
+<span class="nc" id="L179">      String host = uri.getHost();</span>
+<span class="nc" id="L180">      int port = uri.getPort();</span>
+<span class="nc" id="L181">      checkArgument(</span>
+<span class="nc bnc" id="L182" title="All 4 branches missed.">          Strings.isNullOrEmpty(scheme) || scheme.matches(&quot;https?&quot;),</span>
+          &quot;Proxy address '%s' has invalid scheme '%s'.&quot;,
+          proxyAddress,
+          scheme);
+<span class="nc bnc" id="L186" title="All 2 branches missed.">      checkArgument(!Strings.isNullOrEmpty(host), &quot;Proxy address '%s' has no host.&quot;, proxyAddress);</span>
+<span class="nc bnc" id="L187" title="All 2 branches missed.">      checkArgument(port != -1, &quot;Proxy address '%s' has no port.&quot;, proxyAddress);</span>
+<span class="nc" id="L188">      checkArgument(</span>
+<span class="nc" id="L189">          uri.equals(new URI(scheme, null, host, port, null, null, null)),</span>
+          &quot;Invalid proxy address '%s'.&quot;,
+          proxyAddress);
+<span class="nc" id="L192">      return uri;</span>
+<span class="nc" id="L193">    } catch (URISyntaxException e) {</span>
+<span class="nc" id="L194">      throw new IllegalArgumentException(</span>
+<span class="nc" id="L195">          String.format(&quot;Invalid proxy address '%s'.&quot;, proxyAddress), e);</span>
+    }
+  }
+
+  public Optional&lt;URI&gt; getProxyUri() {
+<span class="fc" id="L200">    return proxyUri.toJavaUtil();</span>
+  }
+
+  public Optional&lt;String&gt; getProxyUsername() {
+<span class="fc" id="L204">    return proxyUsername.toJavaUtil();</span>
+  }
+
+  public Optional&lt;String&gt; getProxyPassword() {
+<span class="fc" id="L208">    return proxyPassword.toJavaUtil();</span>
+  }
+
+  Optional&lt;Integer&gt; getHttpMaxRetry() {
+<span class="fc" id="L212">    return httpMaxRetry.toJavaUtil();</span>
+  }
+
+  Optional&lt;Integer&gt; getHttpConnectTimeout() {
+<span class="fc" id="L216">    return httpConnectTimeout.toJavaUtil();</span>
+  }
+
+  Optional&lt;Integer&gt; getHttpReadTimeout() {
+<span class="fc" id="L220">    return httpReadTimeout.toJavaUtil();</span>
+  }
+
+  @Override
+  public boolean equals(Object o) {
+<span class="pc bpc" id="L225" title="1 of 2 branches missed.">    if (this == o) {</span>
+<span class="nc" id="L226">      return true;</span>
+    }
+<span class="pc bpc" id="L228" title="1 of 2 branches missed.">    if (!(o instanceof SparkBigQueryProxyAndHttpConfig)) {</span>
+<span class="nc" id="L229">      return false;</span>
+    }
+<span class="fc" id="L231">    SparkBigQueryProxyAndHttpConfig that = (SparkBigQueryProxyAndHttpConfig) o;</span>
+<span class="pc bpc" id="L232" title="1 of 2 branches missed.">    return Objects.equal(proxyUri, that.proxyUri)</span>
+<span class="pc bpc" id="L233" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(proxyUsername, that.proxyUsername)</span>
+<span class="pc bpc" id="L234" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(proxyPassword, that.proxyPassword)</span>
+<span class="pc bpc" id="L235" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(httpMaxRetry, that.httpMaxRetry)</span>
+<span class="pc bpc" id="L236" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(httpConnectTimeout, that.httpConnectTimeout)</span>
+<span class="pc bpc" id="L237" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(httpReadTimeout, that.httpReadTimeout);</span>
+  }
+
+  @Override
+  public int hashCode() {
+<span class="fc" id="L242">    return Objects.hashCode(</span>
+        proxyUri, proxyUsername, proxyPassword, httpMaxRetry, httpConnectTimeout, httpReadTimeout);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

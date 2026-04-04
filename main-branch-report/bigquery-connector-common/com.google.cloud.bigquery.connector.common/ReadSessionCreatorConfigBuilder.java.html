@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ReadSessionCreatorConfigBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">ReadSessionCreatorConfigBuilder.java</span></div><h1>ReadSessionCreatorConfigBuilder.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.cloud.bigquery.storage.v1.ArrowSerializationOptions.CompressionCodec;
+import com.google.cloud.bigquery.storage.v1.DataFormat;
+import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions.ResponseCompressionCodec;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
+
+<span class="fc" id="L26">public class ReadSessionCreatorConfigBuilder {</span>
+
+  private boolean viewsEnabled;
+<span class="fc" id="L29">  private Optional&lt;String&gt; materializationProject = Optional.empty();</span>
+<span class="fc" id="L30">  private Optional&lt;String&gt; materializationDataset = Optional.empty();</span>
+<span class="fc" id="L31">  private int materializationExpirationTimeInMinutes = 120;</span>
+<span class="fc" id="L32">  private DataFormat readDataFormat = DataFormat.ARROW;</span>
+<span class="fc" id="L33">  private int maxReadRowsRetries = 10;</span>
+<span class="fc" id="L34">  private String viewEnabledParamName = &quot;&quot;;</span>
+<span class="fc" id="L35">  private OptionalInt maxParallelism = OptionalInt.empty();</span>
+<span class="fc" id="L36">  private OptionalInt preferredMinParallelism = OptionalInt.empty();</span>
+<span class="fc" id="L37">  private int defaultParallelism = 1000;</span>
+<span class="fc" id="L38">  private Optional&lt;String&gt; requestEncodedBase = Optional.empty();</span>
+<span class="fc" id="L39">  private Optional&lt;String&gt; bigQueryStorageGrpcEndpoint = Optional.empty();</span>
+<span class="fc" id="L40">  private Optional&lt;String&gt; bigQueryHttpEndpoint = Optional.empty();</span>
+<span class="fc" id="L41">  private int backgroundParsingThreads = 0;</span>
+<span class="fc" id="L42">  private boolean pushAllFilters = true;</span>
+<span class="fc" id="L43">  int prebufferResponses = 1;</span>
+<span class="fc" id="L44">  int streamsPerPartition = 1;</span>
+<span class="fc" id="L45">  private CompressionCodec arrowCompressionCodec = CompressionCodec.COMPRESSION_UNSPECIFIED;</span>
+<span class="fc" id="L46">  private ResponseCompressionCodec responseCompressionCodec =</span>
+      ResponseCompressionCodec.RESPONSE_COMPRESSION_CODEC_UNSPECIFIED;
+<span class="fc" id="L48">  private Optional&lt;String&gt; traceId = Optional.empty();</span>
+<span class="fc" id="L49">  private boolean enableReadSessionCaching = true;</span>
+<span class="fc" id="L50">  private long readSessionCacheDurationMins = 5L;</span>
+<span class="fc" id="L51">  private OptionalLong snapshotTimeMillis = OptionalLong.empty();</span>
+<span class="fc" id="L52">  private boolean enableArrowTimestampRebase = true;</span>
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setViewsEnabled(boolean viewsEnabled) {
+<span class="fc" id="L56">    this.viewsEnabled = viewsEnabled;</span>
+<span class="fc" id="L57">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setMaterializationProject(
+      Optional&lt;String&gt; materializationProject) {
+<span class="fc" id="L63">    this.materializationProject = materializationProject;</span>
+<span class="fc" id="L64">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setMaterializationDataset(
+      Optional&lt;String&gt; materializationDataset) {
+<span class="fc" id="L70">    this.materializationDataset = materializationDataset;</span>
+<span class="fc" id="L71">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setMaterializationExpirationTimeInMinutes(
+      int materializationExpirationTimeInMinutes) {
+<span class="fc" id="L77">    this.materializationExpirationTimeInMinutes = materializationExpirationTimeInMinutes;</span>
+<span class="fc" id="L78">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setReadDataFormat(DataFormat readDataFormat) {
+<span class="fc" id="L83">    this.readDataFormat = readDataFormat;</span>
+<span class="fc" id="L84">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setMaxReadRowsRetries(int maxReadRowsRetries) {
+<span class="fc" id="L89">    this.maxReadRowsRetries = maxReadRowsRetries;</span>
+<span class="fc" id="L90">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setViewEnabledParamName(String viewEnabledParamName) {
+<span class="fc" id="L95">    this.viewEnabledParamName = viewEnabledParamName;</span>
+<span class="fc" id="L96">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setMaxParallelism(OptionalInt maxParallelism) {
+<span class="fc" id="L101">    this.maxParallelism = maxParallelism;</span>
+<span class="fc" id="L102">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setPreferredMinParallelism(
+      OptionalInt preferredMinParallelism) {
+<span class="fc" id="L108">    this.preferredMinParallelism = preferredMinParallelism;</span>
+<span class="fc" id="L109">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setDefaultParallelism(int defaultParallelism) {
+<span class="fc" id="L114">    this.defaultParallelism = defaultParallelism;</span>
+<span class="fc" id="L115">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setRequestEncodedBase(
+      Optional&lt;String&gt; requestEncodedBase) {
+<span class="fc" id="L121">    this.requestEncodedBase = requestEncodedBase;</span>
+<span class="fc" id="L122">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setBigQueryStorageGrpcEndpoint(
+      Optional&lt;String&gt; bigQueryStorageGrpcEndpoint) {
+<span class="fc" id="L128">    this.bigQueryStorageGrpcEndpoint = bigQueryStorageGrpcEndpoint;</span>
+<span class="fc" id="L129">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setBigQueryHttpEndpoint(
+      Optional&lt;String&gt; bigQueryHttpEndpoint) {
+<span class="fc" id="L135">    this.bigQueryHttpEndpoint = bigQueryHttpEndpoint;</span>
+<span class="fc" id="L136">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setBackgroundParsingThreads(int backgroundParsingThreads) {
+<span class="fc" id="L141">    this.backgroundParsingThreads = backgroundParsingThreads;</span>
+<span class="fc" id="L142">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setPushAllFilters(boolean pushAllFilters) {
+<span class="fc" id="L147">    this.pushAllFilters = pushAllFilters;</span>
+<span class="fc" id="L148">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setPrebufferReadRowsResponses(int prebufferResponses) {
+<span class="fc" id="L153">    this.prebufferResponses = prebufferResponses;</span>
+<span class="fc" id="L154">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setStreamsPerPartition(int streamsPerPartition) {
+<span class="fc" id="L159">    this.streamsPerPartition = streamsPerPartition;</span>
+<span class="fc" id="L160">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setArrowCompressionCodec(
+      CompressionCodec arrowCompressionCodec) {
+<span class="fc" id="L166">    this.arrowCompressionCodec = arrowCompressionCodec;</span>
+<span class="fc" id="L167">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setResponseCompressionCodec(
+      ResponseCompressionCodec responseCompressionCodec) {
+<span class="fc" id="L173">    this.responseCompressionCodec = responseCompressionCodec;</span>
+<span class="fc" id="L174">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setTraceId(Optional&lt;String&gt; traceId) {
+<span class="fc" id="L179">    this.traceId = traceId;</span>
+<span class="fc" id="L180">    return this;</span>
+  }
+
+  public ReadSessionCreatorConfigBuilder setEnableReadSessionCaching(
+      boolean enableReadSessionCaching) {
+<span class="fc" id="L185">    this.enableReadSessionCaching = enableReadSessionCaching;</span>
+<span class="fc" id="L186">    return this;</span>
+  }
+
+  public ReadSessionCreatorConfigBuilder setReadSessionCacheDurationMins(
+      long readSessionCacheDurationMins) {
+<span class="fc" id="L191">    this.readSessionCacheDurationMins = readSessionCacheDurationMins;</span>
+<span class="fc" id="L192">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setSnapshotTimeMillis(OptionalLong snapshotTimeMillis) {
+<span class="fc" id="L197">    this.snapshotTimeMillis = snapshotTimeMillis;</span>
+<span class="fc" id="L198">    return this;</span>
+  }
+
+  @CanIgnoreReturnValue
+  public ReadSessionCreatorConfigBuilder setEnableArrowTimestampRebase(
+      boolean enableArrowTimestampRebase) {
+<span class="fc" id="L204">    this.enableArrowTimestampRebase = enableArrowTimestampRebase;</span>
+<span class="fc" id="L205">    return this;</span>
+  }
+
+  public ReadSessionCreatorConfig build() {
+<span class="fc" id="L209">    return new ReadSessionCreatorConfig(</span>
+        viewsEnabled,
+        materializationProject,
+        materializationDataset,
+        materializationExpirationTimeInMinutes,
+        readDataFormat,
+        maxReadRowsRetries,
+        viewEnabledParamName,
+        maxParallelism,
+        preferredMinParallelism,
+        defaultParallelism,
+        requestEncodedBase,
+        bigQueryStorageGrpcEndpoint,
+        bigQueryHttpEndpoint,
+        backgroundParsingThreads,
+        pushAllFilters,
+        prebufferResponses,
+        streamsPerPartition,
+        arrowCompressionCodec,
+        responseCompressionCodec,
+        traceId,
+        enableReadSessionCaching,
+        readSessionCacheDurationMins,
+        snapshotTimeMillis,
+        enableArrowTimestampRebase);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

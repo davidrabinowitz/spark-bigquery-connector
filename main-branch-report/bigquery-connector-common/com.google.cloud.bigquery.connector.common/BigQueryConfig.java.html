@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryConfig.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryConfig.java</span></div><h1>BigQueryConfig.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.api.gax.retrying.RetrySettings;
+import com.google.cloud.bigquery.QueryJobConfiguration.Priority;
+import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+public interface BigQueryConfig {
+
+  Optional&lt;String&gt; getAccessTokenProviderFQCN();
+
+  Optional&lt;String&gt; getAccessTokenProviderConfig();
+
+  Optional&lt;String&gt; getCredentialsKey();
+
+  Optional&lt;String&gt; getCredentialsFile();
+
+  Optional&lt;String&gt; getAccessToken();
+
+  String getLoggedInUserName();
+
+  Set&lt;String&gt; getLoggedInUserGroups();
+
+  Optional&lt;Map&lt;String, String&gt;&gt; getImpersonationServiceAccountsForUsers();
+
+  Optional&lt;Map&lt;String, String&gt;&gt; getImpersonationServiceAccountsForGroups();
+
+  Optional&lt;String&gt; getImpersonationServiceAccount();
+
+  String getParentProjectId();
+
+  Optional&lt;String&gt; getCatalogProjectId();
+
+  Optional&lt;String&gt; getCatalogLocation();
+
+  boolean useParentProjectForMetadataOperations();
+
+  boolean isViewsEnabled();
+
+  Optional&lt;String&gt; getMaterializationProject();
+
+  Optional&lt;String&gt; getMaterializationDataset();
+
+  int getBigQueryClientConnectTimeout();
+
+  int getBigQueryClientReadTimeout();
+
+  RetrySettings getBigQueryClientRetrySettings();
+
+  BigQueryProxyConfig getBigQueryProxyConfig();
+
+  Optional&lt;String&gt; getBigQueryStorageGrpcEndpoint();
+
+  Optional&lt;String&gt; getBigQueryHttpEndpoint();
+
+  int getCacheExpirationTimeInMinutes();
+
+  ImmutableMap&lt;String, String&gt; getBigQueryJobLabels();
+
+  Optional&lt;Long&gt; getCreateReadSessionTimeoutInSeconds();
+
+  int getChannelPoolSize();
+
+  // Get a static flow control window per RPC. When not set
+  // auto flow control is determined by Bandwidth Delay Product.
+  Optional&lt;Integer&gt; getFlowControlWindowBytes();
+
+  Priority getQueryJobPriority();
+
+  long getBigQueryJobTimeoutInMinutes();
+
+  Optional&lt;ImmutableList&lt;String&gt;&gt; getCredentialsScopes();
+
+  default int getClientCreationHashCode() {
+<span class="fc" id="L94">    return Objects.hashCode(</span>
+<span class="fc" id="L95">        getAccessTokenProviderFQCN(),</span>
+<span class="fc" id="L96">        getAccessTokenProviderConfig(),</span>
+<span class="fc" id="L97">        getCredentialsKey(),</span>
+<span class="fc" id="L98">        getAccessToken(),</span>
+<span class="fc" id="L99">        getCredentialsFile(),</span>
+<span class="fc" id="L100">        getBigQueryHttpEndpoint(),</span>
+<span class="fc" id="L101">        getFlowControlWindowBytes(),</span>
+<span class="fc" id="L102">        getBigQueryStorageGrpcEndpoint(),</span>
+<span class="fc" id="L103">        getCreateReadSessionTimeoutInSeconds(),</span>
+<span class="fc" id="L104">        getBigQueryProxyConfig(),</span>
+<span class="fc" id="L105">        getParentProjectId(),</span>
+<span class="fc" id="L106">        useParentProjectForMetadataOperations());</span>
+  }
+
+  default boolean areClientCreationConfigsEqual(BigQueryConfig b) {
+<span class="pc bpc" id="L110" title="1 of 2 branches missed.">    if (this == b) {</span>
+<span class="nc" id="L111">      return true;</span>
+    }
+<span class="pc bpc" id="L113" title="1 of 2 branches missed.">    return Objects.equal(getAccessTokenProviderFQCN(), b.getAccessTokenProviderFQCN())</span>
+<span class="pc bpc" id="L114" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getAccessTokenProviderConfig(), b.getAccessTokenProviderConfig())</span>
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getCredentialsKey(), b.getCredentialsKey())</span>
+<span class="pc bpc" id="L116" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getAccessToken(), b.getAccessToken())</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getCredentialsFile(), b.getCredentialsFile())</span>
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getBigQueryHttpEndpoint(), b.getBigQueryHttpEndpoint())</span>
+<span class="pc bpc" id="L119" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getFlowControlWindowBytes(), b.getFlowControlWindowBytes())</span>
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getBigQueryStorageGrpcEndpoint(), b.getBigQueryStorageGrpcEndpoint())</span>
+<span class="pc bpc" id="L121" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(</span>
+<span class="fc" id="L122">            getCreateReadSessionTimeoutInSeconds(), b.getCreateReadSessionTimeoutInSeconds())</span>
+<span class="pc bpc" id="L123" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getBigQueryProxyConfig(), b.getBigQueryProxyConfig())</span>
+<span class="pc bpc" id="L124" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(getParentProjectId(), b.getParentProjectId())</span>
+<span class="pc bpc" id="L125" title="1 of 2 branches missed.">        &amp;&amp; Objects.equal(</span>
+<span class="fc" id="L126">            useParentProjectForMetadataOperations(), b.useParentProjectForMetadataOperations());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

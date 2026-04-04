@@ -1,0 +1,306 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryClientFactoryConfig.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryClientFactoryConfig.java</span></div><h1>BigQueryClientFactoryConfig.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.api.gax.retrying.RetrySettings;
+import com.google.cloud.bigquery.QueryJobConfiguration;
+import com.google.cloud.bigquery.QueryJobConfiguration.Priority;
+import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+public class BigQueryClientFactoryConfig implements BigQueryConfig {
+
+  private final Optional&lt;String&gt; accessTokenProviderFQCN;
+  private final Optional&lt;String&gt; accessTokenProviderConfig;
+  private final Optional&lt;String&gt; credentialsKey;
+  private final Optional&lt;String&gt; credentialsFile;
+  private final Optional&lt;String&gt; accessToken;
+  private final String loggedInUserName;
+  private final Set&lt;String&gt; loggedInUserGroups;
+  private final Optional&lt;String&gt; impersonationServiceAccount;
+  private final Optional&lt;Map&lt;String, String&gt;&gt; impersonationServiceAccountsForUsers;
+  private final Optional&lt;Map&lt;String, String&gt;&gt; impersonationServiceAccountsForGroups;
+  private final Optional&lt;ImmutableList&lt;String&gt;&gt; credentialsScopes;
+  private final String parentProjectId;
+  private final Optional&lt;String&gt; catalogProjectId;
+  private final Optional&lt;String&gt; catalogLocation;
+  private final boolean useParentProjectForMetadataOperations;
+  private final boolean viewsEnabled;
+  private final Optional&lt;String&gt; materializationProject;
+  private final Optional&lt;String&gt; materializationDataset;
+  private final int bigQueryClientConnectTimeout;
+  private final int bigQueryClientReadTimeout;
+  private final RetrySettings bigQueryClientRetrySettings;
+  private final BigQueryProxyConfig bigQueryProxyConfig;
+  private final Optional&lt;String&gt; bigQueryStorageGrpcEndpoint;
+  private final Optional&lt;String&gt; bigQueryHttpEndpoint;
+  private final int cacheExpirationTimeInMinutes;
+  private final ImmutableMap&lt;String, String&gt; bigQueryJobLabels;
+  private final Optional&lt;Long&gt; createReadSessionTimeoutInSeconds;
+  private final int channelPoolSize;
+  private final Optional&lt;Integer&gt; flowControlWindowBytes;
+  private final QueryJobConfiguration.Priority queryJobPriority;
+  private final long bigQueryJobTimeoutInMinutes;
+
+<span class="nc" id="L62">  BigQueryClientFactoryConfig(BigQueryConfig bigQueryConfig, long bigQueryJobTimeoutInMinutes) {</span>
+<span class="nc" id="L63">    this.accessTokenProviderFQCN = bigQueryConfig.getAccessTokenProviderFQCN();</span>
+<span class="nc" id="L64">    this.accessTokenProviderConfig = bigQueryConfig.getAccessTokenProviderConfig();</span>
+<span class="nc" id="L65">    this.credentialsKey = bigQueryConfig.getCredentialsKey();</span>
+<span class="nc" id="L66">    this.credentialsFile = bigQueryConfig.getCredentialsFile();</span>
+<span class="nc" id="L67">    this.accessToken = bigQueryConfig.getAccessToken();</span>
+<span class="nc" id="L68">    this.loggedInUserName = bigQueryConfig.getLoggedInUserName();</span>
+<span class="nc" id="L69">    this.loggedInUserGroups = bigQueryConfig.getLoggedInUserGroups();</span>
+<span class="nc" id="L70">    this.impersonationServiceAccountsForUsers =</span>
+<span class="nc" id="L71">        bigQueryConfig.getImpersonationServiceAccountsForUsers();</span>
+<span class="nc" id="L72">    this.impersonationServiceAccountsForGroups =</span>
+<span class="nc" id="L73">        bigQueryConfig.getImpersonationServiceAccountsForGroups();</span>
+<span class="nc" id="L74">    this.impersonationServiceAccount = bigQueryConfig.getImpersonationServiceAccount();</span>
+<span class="nc" id="L75">    this.credentialsScopes = bigQueryConfig.getCredentialsScopes();</span>
+<span class="nc" id="L76">    this.parentProjectId = bigQueryConfig.getParentProjectId();</span>
+<span class="nc" id="L77">    this.useParentProjectForMetadataOperations =</span>
+<span class="nc" id="L78">        bigQueryConfig.useParentProjectForMetadataOperations();</span>
+<span class="nc" id="L79">    this.viewsEnabled = bigQueryConfig.isViewsEnabled();</span>
+<span class="nc" id="L80">    this.catalogProjectId = bigQueryConfig.getCatalogProjectId();</span>
+<span class="nc" id="L81">    this.catalogLocation = bigQueryConfig.getCatalogLocation();</span>
+
+<span class="nc" id="L83">    this.materializationProject = bigQueryConfig.getMaterializationProject();</span>
+<span class="nc" id="L84">    this.materializationDataset = bigQueryConfig.getMaterializationDataset();</span>
+<span class="nc" id="L85">    this.bigQueryClientConnectTimeout = bigQueryConfig.getBigQueryClientConnectTimeout();</span>
+<span class="nc" id="L86">    this.bigQueryClientReadTimeout = bigQueryConfig.getBigQueryClientReadTimeout();</span>
+<span class="nc" id="L87">    this.bigQueryClientRetrySettings = bigQueryConfig.getBigQueryClientRetrySettings();</span>
+<span class="nc" id="L88">    this.bigQueryProxyConfig = bigQueryConfig.getBigQueryProxyConfig();</span>
+<span class="nc" id="L89">    this.bigQueryStorageGrpcEndpoint = bigQueryConfig.getBigQueryStorageGrpcEndpoint();</span>
+<span class="nc" id="L90">    this.bigQueryHttpEndpoint = bigQueryConfig.getBigQueryHttpEndpoint();</span>
+<span class="nc" id="L91">    this.cacheExpirationTimeInMinutes = bigQueryConfig.getCacheExpirationTimeInMinutes();</span>
+<span class="nc" id="L92">    this.bigQueryJobLabels = bigQueryConfig.getBigQueryJobLabels();</span>
+<span class="nc" id="L93">    this.createReadSessionTimeoutInSeconds = bigQueryConfig.getCreateReadSessionTimeoutInSeconds();</span>
+<span class="nc" id="L94">    this.channelPoolSize = bigQueryConfig.getChannelPoolSize();</span>
+<span class="nc" id="L95">    this.flowControlWindowBytes = bigQueryConfig.getFlowControlWindowBytes();</span>
+<span class="nc" id="L96">    this.queryJobPriority = bigQueryConfig.getQueryJobPriority();</span>
+<span class="nc" id="L97">    this.bigQueryJobTimeoutInMinutes = bigQueryJobTimeoutInMinutes;</span>
+<span class="nc" id="L98">  }</span>
+
+  @Override
+  public Optional&lt;String&gt; getAccessTokenProviderFQCN() {
+<span class="nc" id="L102">    return accessTokenProviderFQCN;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getAccessTokenProviderConfig() {
+<span class="nc" id="L107">    return accessTokenProviderConfig;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getCredentialsKey() {
+<span class="nc" id="L112">    return credentialsKey;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getCredentialsFile() {
+<span class="nc" id="L117">    return credentialsFile;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getAccessToken() {
+<span class="nc" id="L122">    return accessToken;</span>
+  }
+
+  @Override
+  public String getLoggedInUserName() {
+<span class="nc" id="L127">    return loggedInUserName;</span>
+  }
+
+  @Override
+  public Set&lt;String&gt; getLoggedInUserGroups() {
+<span class="nc" id="L132">    return loggedInUserGroups;</span>
+  }
+
+  @Override
+  public Optional&lt;Map&lt;String, String&gt;&gt; getImpersonationServiceAccountsForUsers() {
+<span class="nc" id="L137">    return impersonationServiceAccountsForUsers;</span>
+  }
+
+  @Override
+  public Optional&lt;Map&lt;String, String&gt;&gt; getImpersonationServiceAccountsForGroups() {
+<span class="nc" id="L142">    return impersonationServiceAccountsForGroups;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getImpersonationServiceAccount() {
+<span class="nc" id="L147">    return impersonationServiceAccount;</span>
+  }
+
+  @Override
+  public Optional&lt;ImmutableList&lt;String&gt;&gt; getCredentialsScopes() {
+<span class="nc" id="L152">    return credentialsScopes;</span>
+  }
+
+  @Override
+  public String getParentProjectId() {
+<span class="nc" id="L157">    return parentProjectId;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getCatalogProjectId() {
+<span class="nc" id="L162">    return catalogProjectId;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getCatalogLocation() {
+<span class="nc" id="L167">    return catalogLocation;</span>
+  }
+
+  @Override
+  public boolean useParentProjectForMetadataOperations() {
+<span class="nc" id="L172">    return useParentProjectForMetadataOperations;</span>
+  }
+
+  @Override
+  public boolean isViewsEnabled() {
+<span class="nc" id="L177">    return viewsEnabled;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getMaterializationProject() {
+<span class="nc" id="L182">    return materializationProject;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getMaterializationDataset() {
+<span class="nc" id="L187">    return materializationDataset;</span>
+  }
+
+  @Override
+  public int getBigQueryClientConnectTimeout() {
+<span class="nc" id="L192">    return bigQueryClientConnectTimeout;</span>
+  }
+
+  @Override
+  public int getBigQueryClientReadTimeout() {
+<span class="nc" id="L197">    return bigQueryClientReadTimeout;</span>
+  }
+
+  @Override
+  public RetrySettings getBigQueryClientRetrySettings() {
+<span class="nc" id="L202">    return bigQueryClientRetrySettings;</span>
+  }
+
+  @Override
+  public BigQueryProxyConfig getBigQueryProxyConfig() {
+<span class="nc" id="L207">    return bigQueryProxyConfig;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getBigQueryStorageGrpcEndpoint() {
+<span class="nc" id="L212">    return bigQueryStorageGrpcEndpoint;</span>
+  }
+
+  @Override
+  public Optional&lt;String&gt; getBigQueryHttpEndpoint() {
+<span class="nc" id="L217">    return bigQueryHttpEndpoint;</span>
+  }
+
+  @Override
+  public int getCacheExpirationTimeInMinutes() {
+<span class="nc" id="L222">    return cacheExpirationTimeInMinutes;</span>
+  }
+
+  @Override
+  public ImmutableMap&lt;String, String&gt; getBigQueryJobLabels() {
+<span class="nc" id="L227">    return bigQueryJobLabels;</span>
+  }
+
+  @Override
+  public Optional&lt;Long&gt; getCreateReadSessionTimeoutInSeconds() {
+<span class="nc" id="L232">    return createReadSessionTimeoutInSeconds;</span>
+  }
+
+  @Override
+  public int getChannelPoolSize() {
+<span class="nc" id="L237">    return channelPoolSize;</span>
+  }
+
+  @Override
+  public Optional&lt;Integer&gt; getFlowControlWindowBytes() {
+<span class="nc" id="L242">    return flowControlWindowBytes;</span>
+  }
+
+  @Override
+  public Priority getQueryJobPriority() {
+<span class="nc" id="L247">    return queryJobPriority;</span>
+  }
+
+  public long getBigQueryJobTimeoutInMinutes() {
+<span class="nc" id="L251">    return bigQueryJobTimeoutInMinutes;</span>
+  }
+
+  @Override
+  public boolean equals(Object o) {
+<span class="nc bnc" id="L256" title="All 2 branches missed.">    if (this == o) {</span>
+<span class="nc" id="L257">      return true;</span>
+    }
+<span class="nc bnc" id="L259" title="All 2 branches missed.">    if (!(o instanceof BigQueryClientFactoryConfig)) {</span>
+<span class="nc" id="L260">      return false;</span>
+    }
+<span class="nc" id="L262">    BigQueryClientFactoryConfig that = (BigQueryClientFactoryConfig) o;</span>
+<span class="nc bnc" id="L263" title="All 6 branches missed.">    return viewsEnabled == that.viewsEnabled</span>
+        &amp;&amp; bigQueryClientConnectTimeout == that.bigQueryClientConnectTimeout
+        &amp;&amp; bigQueryClientReadTimeout == that.bigQueryClientReadTimeout
+<span class="nc bnc" id="L266" title="All 2 branches missed.">        &amp;&amp; Objects.equal(credentialsKey, that.credentialsKey)</span>
+<span class="nc bnc" id="L267" title="All 2 branches missed.">        &amp;&amp; Objects.equal(credentialsFile, that.credentialsFile)</span>
+<span class="nc bnc" id="L268" title="All 2 branches missed.">        &amp;&amp; Objects.equal(accessToken, that.accessToken)</span>
+<span class="nc bnc" id="L269" title="All 2 branches missed.">        &amp;&amp; Objects.equal(parentProjectId, that.parentProjectId)</span>
+<span class="nc bnc" id="L270" title="All 2 branches missed.">        &amp;&amp; Objects.equal(</span>
+<span class="nc" id="L271">            useParentProjectForMetadataOperations, that.useParentProjectForMetadataOperations)</span>
+<span class="nc bnc" id="L272" title="All 2 branches missed.">        &amp;&amp; Objects.equal(materializationProject, that.materializationProject)</span>
+<span class="nc bnc" id="L273" title="All 2 branches missed.">        &amp;&amp; Objects.equal(materializationDataset, that.materializationDataset)</span>
+<span class="nc bnc" id="L274" title="All 2 branches missed.">        &amp;&amp; Objects.equal(bigQueryClientRetrySettings, that.bigQueryClientRetrySettings)</span>
+<span class="nc bnc" id="L275" title="All 2 branches missed.">        &amp;&amp; Objects.equal(bigQueryProxyConfig, that.bigQueryProxyConfig)</span>
+<span class="nc bnc" id="L276" title="All 2 branches missed.">        &amp;&amp; Objects.equal(bigQueryStorageGrpcEndpoint, that.bigQueryStorageGrpcEndpoint)</span>
+<span class="nc bnc" id="L277" title="All 2 branches missed.">        &amp;&amp; Objects.equal(bigQueryHttpEndpoint, that.bigQueryHttpEndpoint)</span>
+<span class="nc bnc" id="L278" title="All 2 branches missed.">        &amp;&amp; Objects.equal(cacheExpirationTimeInMinutes, that.cacheExpirationTimeInMinutes)</span>
+<span class="nc bnc" id="L279" title="All 2 branches missed.">        &amp;&amp; Objects.equal(createReadSessionTimeoutInSeconds, that.createReadSessionTimeoutInSeconds)</span>
+<span class="nc bnc" id="L280" title="All 2 branches missed.">        &amp;&amp; Objects.equal(channelPoolSize, that.channelPoolSize)</span>
+<span class="nc bnc" id="L281" title="All 2 branches missed.">        &amp;&amp; Objects.equal(flowControlWindowBytes, that.flowControlWindowBytes);</span>
+  }
+
+  @Override
+  public int hashCode() {
+<span class="nc" id="L286">    return Objects.hashCode(</span>
+        credentialsKey,
+        credentialsFile,
+        accessToken,
+        parentProjectId,
+<span class="nc" id="L291">        useParentProjectForMetadataOperations,</span>
+<span class="nc" id="L292">        viewsEnabled,</span>
+        materializationProject,
+        materializationDataset,
+<span class="nc" id="L295">        bigQueryClientConnectTimeout,</span>
+<span class="nc" id="L296">        bigQueryClientReadTimeout,</span>
+        bigQueryClientRetrySettings,
+        bigQueryProxyConfig,
+        bigQueryStorageGrpcEndpoint,
+        bigQueryHttpEndpoint,
+<span class="nc" id="L301">        cacheExpirationTimeInMinutes,</span>
+<span class="nc" id="L302">        channelPoolSize,</span>
+        flowControlWindowBytes);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

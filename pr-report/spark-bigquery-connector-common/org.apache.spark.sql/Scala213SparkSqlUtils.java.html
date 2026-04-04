@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>Scala213SparkSqlUtils.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">org.apache.spark.sql</a> &gt; <span class="el_source">Scala213SparkSqlUtils.java</span></div><h1>Scala213SparkSqlUtils.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.spark.sql;
+
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer$;
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder;
+import org.apache.spark.sql.catalyst.encoders.RowEncoder;
+import org.apache.spark.sql.catalyst.expressions.Attribute;
+import org.apache.spark.sql.catalyst.expressions.AttributeReference;
+import org.apache.spark.sql.catalyst.expressions.NamedExpression;
+import org.apache.spark.sql.types.StructType;
+import scala.collection.JavaConverters;
+import scala.collection.mutable.ListBuffer;
+
+<span class="nc" id="L32">public class Scala213SparkSqlUtils extends SparkSqlUtils {</span>
+
+  @Override
+  public boolean supportsScalaVersion(String scalaVersion) {
+<span class="nc bnc" id="L36" title="All 2 branches missed.">    return scalaVersion.compareTo(&quot;2.13&quot;) &gt;= 0;</span>
+  }
+
+  @Override
+  public InternalRow rowToInternalRow(Row row) {
+<span class="nc" id="L41">    return InternalRow.fromSeq(row.toSeq());</span>
+  }
+
+  // This method relies on the scala.Seq alias, which is different in Scala 2.12 and 2.13. In Scala
+  // 2.12 scala.Seq points to scala.collection.Seq whereas in Scala 2.13 it points to
+  // scala.collection.immutable.Seq.
+  @Override
+  public ExpressionEncoder&lt;Row&gt; createExpressionEncoder(StructType schema) {
+<span class="nc" id="L49">    List&lt;Attribute&gt; attributes =</span>
+<span class="nc" id="L50">        JavaConverters.asJavaCollection(toAttributes(schema)).stream()</span>
+<span class="nc" id="L51">            .map(Attribute::toAttribute)</span>
+<span class="nc" id="L52">            .collect(Collectors.toList());</span>
+<span class="nc" id="L53">    ExpressionEncoder&lt;Row&gt; expressionEncoder =</span>
+<span class="nc" id="L54">        RowEncoder.apply(schema)</span>
+<span class="nc" id="L55">            .resolveAndBind(</span>
+<span class="nc" id="L56">                JavaConverters.asScalaIteratorConverter(attributes.iterator()).asScala().toSeq(),</span>
+                SimpleAnalyzer$.MODULE$);
+<span class="nc" id="L58">    return expressionEncoder;</span>
+  }
+
+  // `toAttributes` is protected[sql] starting spark 3.2.0, so we need this call to be in the same
+  // package. Since Scala 2.13/Spark 3.3 forbids it, the implementation has been ported to Java
+  public static scala.collection.immutable.Seq&lt;AttributeReference&gt; toAttributes(StructType schema) {
+<span class="nc" id="L64">    return JavaConverters.asScalaBuffer(</span>
+<span class="nc" id="L65">            Stream.of(schema.fields())</span>
+<span class="nc" id="L66">                .map(</span>
+                    field -&gt;
+<span class="nc" id="L68">                        new AttributeReference(</span>
+<span class="nc" id="L69">                            field.name(),</span>
+<span class="nc" id="L70">                            field.dataType(),</span>
+<span class="nc" id="L71">                            field.nullable(),</span>
+<span class="nc" id="L72">                            field.metadata(),</span>
+<span class="nc" id="L73">                            NamedExpression.newExprId(),</span>
+<span class="nc" id="L74">                            new ListBuffer&lt;String&gt;().toStream()))</span>
+<span class="nc" id="L75">                .collect(Collectors.toList()))</span>
+<span class="nc" id="L76">        .toSeq();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

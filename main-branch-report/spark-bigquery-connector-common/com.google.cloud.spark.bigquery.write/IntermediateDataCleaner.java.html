@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>IntermediateDataCleaner.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.write</a> &gt; <span class="el_source">IntermediateDataCleaner.java</span></div><h1>IntermediateDataCleaner.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.write;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Responsible for recursively deleting the intermediate path. Implementing Runnable in order to act
+ * as shutdown hook.
+ */
+public class IntermediateDataCleaner extends Thread {
+<span class="fc" id="L29">  private static final Logger logger = LoggerFactory.getLogger(IntermediateDataCleaner.class);</span>
+
+  /** the path to delete */
+  private final Path path;
+  /** the hadoop configuration */
+  private final Configuration conf;
+
+<span class="fc" id="L36">  public IntermediateDataCleaner(Path path, Configuration conf) {</span>
+<span class="fc" id="L37">    this.path = path;</span>
+<span class="fc" id="L38">    this.conf = conf;</span>
+<span class="fc" id="L39">  }</span>
+
+  @Override
+  public void run() {
+<span class="nc" id="L43">    deletePath();</span>
+<span class="nc" id="L44">  }</span>
+
+  public void deletePath() {
+    try {
+<span class="fc" id="L48">      logger.info(&quot;Deleting path &quot; + path + &quot; if it exists&quot;);</span>
+      // Create a copy of the config to avoid polluting the global state
+<span class="fc" id="L50">      Configuration cleanConf = new Configuration(conf);</span>
+
+      // Force a fresh instance that isn't already closed by Spark
+<span class="fc" id="L53">      String scheme = path.toUri().getScheme();</span>
+<span class="pc bpc" id="L54" title="1 of 2 branches missed.">      if (scheme != null) {</span>
+<span class="fc" id="L55">        cleanConf.set(&quot;fs.&quot; + scheme + &quot;.impl.disable.cache&quot;, &quot;true&quot;);</span>
+      }
+
+      // Use the specific URI to ensure GCS is targeted
+<span class="fc" id="L59">      FileSystem fs = FileSystem.get(path.toUri(), cleanConf);</span>
+<span class="pc bpc" id="L60" title="1 of 2 branches missed.">      if (pathExists(fs, path)) {</span>
+<span class="fc" id="L61">        fs.delete(path, true);</span>
+      }
+<span class="fc" id="L63">      logger.info(&quot;Path &quot; + path + &quot; no longer exists)&quot;);</span>
+<span class="nc" id="L64">    } catch (Exception e) {</span>
+<span class="nc" id="L65">      logger.error(&quot;Failed to delete path &quot; + path, e);</span>
+<span class="fc" id="L66">    }</span>
+<span class="fc" id="L67">  }</span>
+
+  public void deleteEpochPath(long epochId) {
+<span class="fc" id="L70">    Path epochPath = new Path(path + &quot;/&quot; + epochId);</span>
+    try {
+<span class="fc" id="L72">      logger.info(&quot;Deleting epoch path &quot; + epochPath + &quot; if it exists&quot;);</span>
+<span class="fc" id="L73">      FileSystem fs = epochPath.getFileSystem(conf);</span>
+<span class="pc bpc" id="L74" title="1 of 2 branches missed.">      if (pathExists(fs, epochPath)) {</span>
+<span class="fc" id="L75">        fs.delete(epochPath, true);</span>
+      }
+<span class="fc" id="L77">      logger.info(&quot;Path &quot; + epochPath + &quot; no longer exists)&quot;);</span>
+<span class="nc" id="L78">    } catch (Exception e) {</span>
+<span class="nc" id="L79">      logger.error(&quot;Failed to delete path &quot; + epochPath, e);</span>
+<span class="fc" id="L80">    }</span>
+<span class="fc" id="L81">  }</span>
+
+  // fs.exists can throw exception on missing path
+  private boolean pathExists(FileSystem fs, Path path) {
+    try {
+<span class="fc" id="L86">      return fs.exists(path);</span>
+<span class="nc" id="L87">    } catch (Exception e) {</span>
+<span class="nc" id="L88">      return false;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

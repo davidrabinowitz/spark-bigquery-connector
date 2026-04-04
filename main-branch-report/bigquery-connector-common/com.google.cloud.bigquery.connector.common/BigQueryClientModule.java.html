@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryClientModule.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryClientModule.java</span></div><h1>BigQueryClientModule.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.api.gax.rpc.HeaderProvider;
+import com.google.cloud.bigquery.BigQueryOptions;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.http.HttpTransportOptions;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.collect.ImmutableMap;
+import com.google.inject.Binder;
+import com.google.inject.Provides;
+import com.google.inject.Scopes;
+import com.google.inject.Singleton;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
+<span class="fc" id="L32">public class BigQueryClientModule implements com.google.inject.Module {</span>
+
+  private static final int DESTINATION_TABLE_CACHE_MAX_SIZE = 1000;
+
+  /*
+   * In order to parameterize the cache expiration time, the instance needs to be loaded lazily.
+   * The instance is marked as static so that the instance is a singleton.
+   */
+  private static Cache&lt;String, TableInfo&gt; cacheInstance;
+
+  @Provides
+  @Singleton
+  public static HeaderProvider createHeaderProvider(
+      BigQueryConfig config, UserAgentProvider userAgentProvider) {
+<span class="fc" id="L46">    return HttpUtil.createHeaderProvider(config, userAgentProvider.getUserAgent());</span>
+  }
+
+  @Override
+  public void configure(Binder binder) {
+    // BigQuery related
+<span class="fc" id="L52">    binder.bind(BigQueryClientFactory.class).in(Scopes.SINGLETON);</span>
+<span class="fc" id="L53">    binder</span>
+<span class="fc" id="L54">        .bind(BigQueryTracerFactory.class)</span>
+<span class="fc" id="L55">        .toInstance(new LoggingBigQueryTracerFactory(/*Log every 2^14 batches*/ 14));</span>
+<span class="fc" id="L56">  }</span>
+
+  @Provides
+  @Singleton
+  public BigQueryCredentialsSupplier provideBigQueryCredentialsSupplier(BigQueryConfig config) {
+<span class="fc" id="L61">    BigQueryProxyConfig proxyConfig = config.getBigQueryProxyConfig();</span>
+<span class="fc" id="L62">    return new BigQueryCredentialsSupplier(</span>
+<span class="fc" id="L63">        config.getAccessTokenProviderFQCN(),</span>
+<span class="fc" id="L64">        config.getAccessTokenProviderConfig(),</span>
+<span class="fc" id="L65">        config.getAccessToken(),</span>
+<span class="fc" id="L66">        config.getCredentialsKey(),</span>
+<span class="fc" id="L67">        config.getCredentialsFile(),</span>
+<span class="fc" id="L68">        config.getLoggedInUserName(),</span>
+<span class="fc" id="L69">        config.getLoggedInUserGroups(),</span>
+<span class="fc" id="L70">        config.getImpersonationServiceAccountsForUsers(),</span>
+<span class="fc" id="L71">        config.getImpersonationServiceAccountsForGroups(),</span>
+<span class="fc" id="L72">        config.getImpersonationServiceAccount(),</span>
+<span class="fc" id="L73">        config.getCredentialsScopes(),</span>
+<span class="fc" id="L74">        proxyConfig.getProxyUri(),</span>
+<span class="fc" id="L75">        proxyConfig.getProxyUsername(),</span>
+<span class="fc" id="L76">        proxyConfig.getProxyPassword());</span>
+  }
+
+  @Provides
+  @Singleton
+  public Cache&lt;String, TableInfo&gt; provideDestinationTableCache(BigQueryConfig config) {
+<span class="fc bfc" id="L82" title="All 2 branches covered.">    if (cacheInstance == null) {</span>
+<span class="fc" id="L83">      synchronized (BigQueryClientModule.class) {</span>
+<span class="pc bpc" id="L84" title="1 of 2 branches missed.">        if (cacheInstance == null) {</span>
+          cacheInstance =
+<span class="fc" id="L86">              CacheBuilder.newBuilder()</span>
+<span class="fc" id="L87">                  .expireAfterWrite(config.getCacheExpirationTimeInMinutes(), TimeUnit.MINUTES)</span>
+<span class="fc" id="L88">                  .maximumSize(DESTINATION_TABLE_CACHE_MAX_SIZE)</span>
+<span class="fc" id="L89">                  .build();</span>
+        }
+<span class="fc" id="L91">      }</span>
+    }
+
+<span class="fc" id="L94">    return cacheInstance;</span>
+  }
+
+  @Provides
+  @Singleton
+  public BigQueryClient provideBigQueryClient(
+      BigQueryConfig config,
+      HeaderProvider headerProvider,
+      BigQueryCredentialsSupplier bigQueryCredentialsSupplier,
+      Cache&lt;String, TableInfo&gt; destinationTableCache,
+      EnvironmentContext environmentContext,
+      BigQueryJobCompletionListener jobCompletionListener) {
+    BigQueryOptions.Builder options =
+<span class="fc" id="L107">        BigQueryOptions.newBuilder()</span>
+<span class="fc" id="L108">            .setHeaderProvider(headerProvider)</span>
+<span class="fc" id="L109">            .setProjectId(config.getCatalogProjectId().orElse(config.getParentProjectId()))</span>
+<span class="fc" id="L110">            .setCredentials(bigQueryCredentialsSupplier.getCredentials())</span>
+<span class="fc" id="L111">            .setRetrySettings(config.getBigQueryClientRetrySettings())</span>
+<span class="fc" id="L112">            .setUniverseDomain(bigQueryCredentialsSupplier.getUniverseDomain());</span>
+
+<span class="fc" id="L114">    config.getCatalogLocation().ifPresent(options::setLocation);</span>
+
+    HttpTransportOptions.Builder httpTransportOptionsBuilder =
+<span class="fc" id="L117">        HttpTransportOptions.newBuilder()</span>
+<span class="fc" id="L118">            .setConnectTimeout(config.getBigQueryClientConnectTimeout())</span>
+<span class="fc" id="L119">            .setReadTimeout(config.getBigQueryClientReadTimeout());</span>
+<span class="fc" id="L120">    BigQueryProxyConfig proxyConfig = config.getBigQueryProxyConfig();</span>
+<span class="pc bpc" id="L121" title="1 of 2 branches missed.">    if (proxyConfig.getProxyUri().isPresent()) {</span>
+<span class="nc" id="L122">      httpTransportOptionsBuilder.setHttpTransportFactory(</span>
+<span class="nc" id="L123">          BigQueryProxyTransporterBuilder.createHttpTransportFactory(</span>
+<span class="nc" id="L124">              proxyConfig.getProxyUri(),</span>
+<span class="nc" id="L125">              proxyConfig.getProxyUsername(),</span>
+<span class="nc" id="L126">              proxyConfig.getProxyPassword()));</span>
+    }
+
+<span class="fc" id="L129">    config.getBigQueryHttpEndpoint().ifPresent(options::setHost);</span>
+
+<span class="fc" id="L131">    options.setTransportOptions(httpTransportOptionsBuilder.build());</span>
+    ImmutableMap&lt;String, String&gt; bigQueryJobLabels =
+<span class="fc" id="L133">        ImmutableMap.&lt;String, String&gt;builder()</span>
+<span class="fc" id="L134">            .putAll(environmentContext.getBigQueryJobLabels())</span>
+<span class="fc" id="L135">            .putAll(config.getBigQueryJobLabels())</span>
+<span class="fc" id="L136">            .build();</span>
+<span class="fc" id="L137">    return new BigQueryClient(</span>
+<span class="fc" id="L138">        options.build().getService(),</span>
+<span class="fc" id="L139">        config.getMaterializationProject(),</span>
+<span class="fc" id="L140">        config.getMaterializationDataset(),</span>
+        destinationTableCache,
+        bigQueryJobLabels,
+<span class="fc" id="L143">        config.getQueryJobPriority(),</span>
+<span class="fc" id="L144">        Optional.of(jobCompletionListener),</span>
+<span class="fc" id="L145">        config.getBigQueryJobTimeoutInMinutes());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

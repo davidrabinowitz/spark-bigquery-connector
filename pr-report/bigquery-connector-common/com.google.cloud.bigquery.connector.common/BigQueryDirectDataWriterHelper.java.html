@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryDirectDataWriterHelper.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">BigQueryDirectDataWriterHelper.java</span></div><h1>BigQueryDirectDataWriterHelper.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2018 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.api.client.util.Sleeper;
+import com.google.api.core.ApiFuture;
+import com.google.api.core.ApiFutures;
+import com.google.api.core.NanoClock;
+import com.google.api.gax.retrying.*;
+import com.google.cloud.bigquery.storage.v1.AppendRowsResponse;
+import com.google.cloud.bigquery.storage.v1.BigQueryWriteClient;
+import com.google.cloud.bigquery.storage.v1.CreateWriteStreamRequest;
+import com.google.cloud.bigquery.storage.v1.Exceptions.OffsetAlreadyExists;
+import com.google.cloud.bigquery.storage.v1.FinalizeWriteStreamRequest;
+import com.google.cloud.bigquery.storage.v1.FinalizeWriteStreamResponse;
+import com.google.cloud.bigquery.storage.v1.ProtoRows;
+import com.google.cloud.bigquery.storage.v1.ProtoSchema;
+import com.google.cloud.bigquery.storage.v1.StreamWriter;
+import com.google.cloud.bigquery.storage.v1.WriteStream;
+import com.google.cloud.bigquery.storage.v1.stub.readrows.ApiResultRetryAlgorithm;
+import com.google.common.base.Optional;
+import com.google.protobuf.ByteString;
+import java.io.IOException;
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * The class which sketches out the necessary functions in order for a Spark DataWriter to interact
+ * with the BigQuery Storage Write API.
+ */
+public class BigQueryDirectDataWriterHelper {
+<span class="fc" id="L51">  final Logger logger = LoggerFactory.getLogger(BigQueryDirectDataWriterHelper.class);</span>
+
+  // multiplying with 0.95 so as to keep a buffer preventing the quota limits
+<span class="fc" id="L54">  final long MAX_APPEND_ROWS_REQUEST_SIZE = (long) (StreamWriter.getApiMaxRequestBytes() * 0.95);</span>
+
+  private final BigQueryWriteClient writeClient;
+  private final String tablePath;
+  private final ProtoSchema protoSchema;
+  private final RetrySettings retrySettings;
+  private final Optional&lt;String&gt; traceId;
+  private final int partitionId;
+  private final boolean writeAtLeastOnce;
+
+  private String writeStreamName;
+  private StreamWriter streamWriter;
+  private ProtoRows.Builder protoRows;
+
+<span class="fc" id="L68">  private long appendRequestRowCount = 0; // number of rows waiting for the next append request</span>
+<span class="fc" id="L69">  private long appendRequestSizeBytes = 0; // number of bytes waiting for the next append request</span>
+<span class="fc" id="L70">  private long writeStreamRowCount = 0; // total offset / rows of the current write-stream</span>
+<span class="fc" id="L71">  private long writeStreamTotalBytes = 0; // total bytes written by the current write-stream</span>
+
+<span class="fc" id="L73">  private final ExecutorService appendRowsExecutor = Executors.newSingleThreadExecutor();</span>
+<span class="fc" id="L74">  private final Queue&lt;ApiFuture&lt;AppendRowsResponse&gt;&gt; appendRowsFuturesQueue = new LinkedList&lt;&gt;();</span>
+
+  public BigQueryDirectDataWriterHelper(
+      BigQueryClientFactory writeClientFactory,
+      String tablePath,
+      ProtoSchema protoSchema,
+      RetrySettings bigqueryDataWriterHelperRetrySettings,
+      Optional&lt;String&gt; traceId,
+      int partitionId,
+<span class="fc" id="L83">      boolean writeAtLeastOnce) {</span>
+<span class="fc" id="L84">    this.writeClient = writeClientFactory.getBigQueryWriteClient();</span>
+<span class="fc" id="L85">    this.tablePath = tablePath;</span>
+<span class="fc" id="L86">    this.protoSchema = protoSchema;</span>
+<span class="fc" id="L87">    this.retrySettings = bigqueryDataWriterHelperRetrySettings;</span>
+<span class="fc" id="L88">    this.traceId = traceId;</span>
+<span class="fc" id="L89">    this.partitionId = partitionId;</span>
+<span class="fc" id="L90">    this.writeAtLeastOnce = writeAtLeastOnce;</span>
+
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    if (writeAtLeastOnce) {</span>
+<span class="fc" id="L93">      this.writeStreamName = this.tablePath + &quot;/_default&quot;;</span>
+    } else {
+      try {
+<span class="fc" id="L96">        this.writeStreamName = retryCreateWriteStream();</span>
+<span class="nc" id="L97">      } catch (ExecutionException | InterruptedException e) {</span>
+<span class="nc" id="L98">        throw new BigQueryConnectorException(</span>
+            &quot;Could not create write-stream after multiple retries&quot;, e);
+<span class="fc" id="L100">      }</span>
+    }
+<span class="fc" id="L102">    this.streamWriter = createStreamWriter(this.writeStreamName);</span>
+<span class="fc" id="L103">    this.protoRows = ProtoRows.newBuilder();</span>
+<span class="fc" id="L104">  }</span>
+
+  /**
+   * Submits a callable that creates a BigQuery Storage Write API write-stream to function
+   * {retryCallable}.
+   *
+   * @see this#retryCallable(Callable createWriteStream)
+   * @return The write-stream name, if it was successfully created.
+   * @throws ExecutionException If retryCallable failed to create the write-stream after multiple
+   *     retries.
+   * @throws InterruptedException If retryCallable was interrupted while creating the write-stream
+   *     during a retry.
+   */
+  private String retryCreateWriteStream() throws ExecutionException, InterruptedException {
+<span class="fc" id="L118">    return retryCallable(</span>
+        () -&gt;
+<span class="fc" id="L120">            this.writeClient</span>
+<span class="fc" id="L121">                .createWriteStream(</span>
+<span class="fc" id="L122">                    CreateWriteStreamRequest.newBuilder()</span>
+<span class="fc" id="L123">                        .setParent(this.tablePath)</span>
+<span class="fc" id="L124">                        .setWriteStream(</span>
+<span class="fc" id="L125">                            WriteStream.newBuilder().setType(WriteStream.Type.PENDING).build())</span>
+<span class="fc" id="L126">                        .build())</span>
+<span class="fc" id="L127">                .getName());</span>
+  }
+
+  /**
+   * A helper method in order to retry certain tasks: currently used for creating a write-stream,
+   * and finalizing a write-stream, if those requests reached a retriable error.
+   *
+   * @param callable The callable to retry.
+   * @param &lt;V&gt; The return value of the callable (currently, either a String (write-stream name) or
+   *     a FinalizeWriteStreamResponse.
+   * @return V.
+   * @throws ExecutionException If retryCallable failed to create the write-stream after multiple
+   *     retries.
+   * @throws InterruptedException If retryCallable was interrupted while creating the write-stream
+   *     during a retry.
+   */
+  private &lt;V&gt; V retryCallable(Callable&lt;V&gt; callable)
+      throws ExecutionException, InterruptedException {
+<span class="fc" id="L145">    DirectRetryingExecutor&lt;V&gt; directRetryingExecutor =</span>
+        new DirectRetryingExecutor&lt;&gt;(
+            new RetryAlgorithm&lt;&gt;(
+                new ApiResultRetryAlgorithm&lt;&gt;(),
+<span class="fc" id="L149">                new ExponentialRetryAlgorithm(this.retrySettings, NanoClock.getDefaultClock())));</span>
+<span class="fc" id="L150">    RetryingFuture&lt;V&gt; retryingFuture = directRetryingExecutor.createFuture(callable);</span>
+<span class="fc" id="L151">    return directRetryingExecutor.submit(retryingFuture).get();</span>
+  }
+
+  private StreamWriter createStreamWriter(String writeStreamName) {
+    try {
+<span class="fc" id="L156">      StreamWriter.Builder streamWriter =</span>
+<span class="fc" id="L157">          StreamWriter.newBuilder(writeStreamName, writeClient)</span>
+<span class="fc" id="L158">              .setWriterSchema(this.protoSchema)</span>
+<span class="fc" id="L159">              .setEnableConnectionPool(this.writeAtLeastOnce)</span>
+<span class="fc" id="L160">              .setRetrySettings(this.retrySettings);</span>
+<span class="pc bpc" id="L161" title="1 of 2 branches missed.">      if (traceId.isPresent()) {</span>
+<span class="fc" id="L162">        streamWriter.setTraceId(traceId.get());</span>
+      }
+<span class="fc" id="L164">      return streamWriter.build();</span>
+<span class="nc" id="L165">    } catch (IOException e) {</span>
+<span class="nc" id="L166">      throw new BigQueryConnectorException(&quot;Could not build stream-writer&quot;, e);</span>
+    }
+  }
+
+  /**
+   * Adds a row to the protoRows, which acts as a buffer; but before, checks if the current message
+   * size in bytes will cause the protoRows buffer to exceed the maximum APPEND_REQUEST_SIZE, and if
+   * it will, sends an append rows request first.
+   *
+   * @see this#sendAppendRowsRequest()
+   * @param message The row, in a ByteString message, to be added to protoRows.
+   * @throws IOException If sendAppendRowsRequest fails.
+   */
+  public void addRow(ByteString message) throws IOException {
+<span class="fc" id="L180">    int messageSize = message.size() + 2; // Protobuf overhead is at least 2 bytes per row.</span>
+
+<span class="pc bpc" id="L182" title="1 of 2 branches missed.">    if (appendRequestSizeBytes + messageSize &gt; MAX_APPEND_ROWS_REQUEST_SIZE) {</span>
+      // If a single row exceeds the maximum size for an append request, this is a nonrecoverable
+      // error.
+<span class="nc bnc" id="L185" title="All 2 branches missed.">      if (messageSize &gt; MAX_APPEND_ROWS_REQUEST_SIZE) {</span>
+<span class="nc" id="L186">        throw new IOException(</span>
+<span class="nc" id="L187">            String.format(</span>
+                &quot;A single row of size %d bytes exceeded the maximum of %d bytes for an&quot;
+                    + &quot; append-rows-request size&quot;,
+<span class="nc" id="L190">                messageSize, MAX_APPEND_ROWS_REQUEST_SIZE));</span>
+      }
+<span class="nc" id="L192">      sendAppendRowsRequest();</span>
+    }
+
+<span class="fc" id="L195">    protoRows.addSerializedRows(message);</span>
+<span class="fc" id="L196">    appendRequestSizeBytes += messageSize;</span>
+<span class="fc" id="L197">    appendRequestRowCount++;</span>
+<span class="fc" id="L198">  }</span>
+
+  /**
+   * Throws an exception if there is an error in any of the responses received thus far. Since
+   * responses arrive in order, we proceed to check the next response only after the previous
+   * response has arrived.
+   *
+   * @throws BigQueryConnectorException If there was an invalid response
+   */
+  private void checkForFailedResponse(boolean waitForResponse) {
+<span class="fc" id="L208">    ApiFuture&lt;AppendRowsResponse&gt; validatedAppendRowsFuture = null;</span>
+<span class="fc bfc" id="L209" title="All 2 branches covered.">    while ((validatedAppendRowsFuture = appendRowsFuturesQueue.peek()) != null) {</span>
+<span class="pc bpc" id="L210" title="3 of 4 branches missed.">      if (waitForResponse || validatedAppendRowsFuture.isDone()) {</span>
+<span class="fc" id="L211">        appendRowsFuturesQueue.poll();</span>
+<span class="fc" id="L212">        boolean succeeded = false;</span>
+        try {
+<span class="fc" id="L214">          AppendRowsResponse response = validatedAppendRowsFuture.get();</span>
+          // If we got here, the response was successful
+<span class="fc" id="L216">          succeeded = true;</span>
+<span class="fc" id="L217">        } catch (ExecutionException e) {</span>
+<span class="pc bpc" id="L218" title="1 of 2 branches missed.">          if (e.getCause().getClass() == OffsetAlreadyExists.class) {</span>
+            // Under heavy load the WriteAPI client library may resend a request due to failed
+            // connection. The OffsetAlreadyExists exception indicates a request was previously
+            // sent, hence it is safe to ignore it.
+<span class="nc" id="L222">            logger.warn(&quot;Ignoring OffsetAlreadyExists exception: {}&quot;, e.getCause().getMessage());</span>
+<span class="nc" id="L223">            succeeded = true;</span>
+          } else {
+<span class="fc" id="L225">            logger.error(</span>
+                &quot;Write-stream {} with name {} exception while retrieving AppendRowsResponse&quot;,
+<span class="fc" id="L227">                partitionId,</span>
+                writeStreamName);
+<span class="fc" id="L229">            throw new BigQueryConnectorException(</span>
+                &quot;Execution Exception while retrieving AppendRowsResponse&quot;, e);
+          }
+<span class="nc" id="L232">        } catch (InterruptedException e) {</span>
+<span class="nc" id="L233">          logger.error(</span>
+              &quot;Write-stream {} with name {} interrupted exception while retrieving AppendRowsResponse&quot;,
+<span class="nc" id="L235">              partitionId,</span>
+              writeStreamName);
+<span class="nc" id="L237">          throw new BigQueryConnectorException(</span>
+              &quot;Interrupted Exception while retrieving AppendRowsResponse&quot;, e);
+        } finally {
+<span class="fc bfc" id="L240" title="All 2 branches covered.">          if (!succeeded) {</span>
+<span class="fc" id="L241">            appendRowsExecutor.shutdown();</span>
+          }
+        }
+<span class="fc" id="L244">      } else {</span>
+        break;
+      }
+    }
+<span class="fc" id="L248">  }</span>
+
+  /**
+   * Sends an AppendRowsRequest to the BigQuery Storage Write API.
+   *
+   * @throws IOException If the append rows request fails: either by returning the wrong offset
+   *     (deduplication error) or if the response contains an error.
+   */
+  private void sendAppendRowsRequest() throws IOException {
+<span class="fc" id="L257">    checkForFailedResponse(false /*waitForResponse*/);</span>
+<span class="fc bfc" id="L258" title="All 2 branches covered.">    long offset = this.writeAtLeastOnce ? -1 : writeStreamRowCount;</span>
+
+<span class="fc" id="L260">    ApiFuture&lt;AppendRowsResponse&gt; appendRowsResponseApiFuture =</span>
+<span class="fc" id="L261">        streamWriter.append(protoRows.build(), offset);</span>
+<span class="fc" id="L262">    ApiFuture&lt;AppendRowsResponse&gt; validatedAppendRowsFuture =</span>
+<span class="fc" id="L263">        ApiFutures.transformAsync(</span>
+            appendRowsResponseApiFuture,
+<span class="fc" id="L265">            appendRowsResponse -&gt; validateAppendRowsResponse(appendRowsResponse, offset),</span>
+            appendRowsExecutor);
+<span class="fc" id="L267">    appendRowsFuturesQueue.add(validatedAppendRowsFuture);</span>
+<span class="fc" id="L268">    clearProtoRows();</span>
+<span class="fc" id="L269">    this.writeStreamRowCount += appendRequestRowCount;</span>
+<span class="fc" id="L270">    this.writeStreamTotalBytes += appendRequestSizeBytes;</span>
+<span class="fc" id="L271">    this.appendRequestRowCount = 0;</span>
+<span class="fc" id="L272">    this.appendRequestSizeBytes = 0;</span>
+<span class="fc" id="L273">  }</span>
+
+  /**
+   * Validates an AppendRowsResponse, after retrieving its future: makes sure the responses' future
+   * matches the expectedOffset, and returned with no errors.
+   *
+   * @param appendRowsResponse The AppendRowsResponse
+   * @param expectedOffset The expected offset to be returned by the response.
+   * @throws IOException If the response returned with error, or the offset did not match the
+   *     expected offset.
+   */
+  private ApiFuture&lt;AppendRowsResponse&gt; validateAppendRowsResponse(
+      AppendRowsResponse appendRowsResponse, long expectedOffset) throws IOException {
+<span class="pc bpc" id="L286" title="1 of 2 branches missed.">    if (appendRowsResponse.hasError()) {</span>
+<span class="nc" id="L287">      throw new IOException(</span>
+<span class="nc" id="L288">          &quot;Append request failed with error: &quot; + appendRowsResponse.getError().getMessage());</span>
+    }
+
+<span class="fc bfc" id="L291" title="All 2 branches covered.">    if (!this.writeAtLeastOnce) {</span>
+<span class="fc" id="L292">      AppendRowsResponse.AppendResult appendResult = appendRowsResponse.getAppendResult();</span>
+<span class="fc" id="L293">      long responseOffset = appendResult.getOffset().getValue();</span>
+
+<span class="pc bpc" id="L295" title="1 of 2 branches missed.">      if (expectedOffset != responseOffset) {</span>
+<span class="nc" id="L296">        throw new IOException(</span>
+<span class="nc" id="L297">            String.format(</span>
+                &quot;On stream %s append-rows response, offset %d did not match expected offset %d&quot;,
+<span class="nc" id="L299">                writeStreamName, responseOffset, expectedOffset));</span>
+      }
+    }
+<span class="fc" id="L302">    return ApiFutures.immediateFuture(appendRowsResponse);</span>
+  }
+
+  /**
+   * Appends any data that remains in the protoRows, waits for 500 milliseconds, and finalizes the
+   * write-stream. This also closes the internal StreamWriter, so that the helper instance is not
+   * usable after calling &lt;code&gt;finalizeStream()&lt;/code&gt;.
+   *
+   * @return The finalized row-count of the write-stream.
+   * @throws IOException If the row-count returned by the FinalizeWriteStreamResponse does not match
+   *     the expected offset (which is equal to the number of rows appended thus far).
+   * @see this#writeStreamRowCount
+   */
+  public WriteStreamStatistics finalizeStream() throws IOException {
+<span class="pc bpc" id="L316" title="1 of 2 branches missed.">    if (this.protoRows.getSerializedRowsCount() != 0) {</span>
+<span class="fc" id="L317">      sendAppendRowsRequest();</span>
+    }
+    try {
+<span class="fc" id="L320">      checkForFailedResponse(true /* waitForResponse */);</span>
+    } finally {
+<span class="fc" id="L322">      appendRowsExecutor.shutdown();</span>
+    }
+<span class="fc" id="L324">    long responseFinalizedRowCount = writeStreamRowCount;</span>
+<span class="fc" id="L325">    long responseFinalizedBytesWritten = writeStreamTotalBytes;</span>
+
+<span class="fc bfc" id="L327" title="All 2 branches covered.">    if (!this.writeAtLeastOnce) {</span>
+<span class="fc" id="L328">      waitBeforeFinalization();</span>
+
+      FinalizeWriteStreamRequest finalizeWriteStreamRequest =
+<span class="fc" id="L331">          FinalizeWriteStreamRequest.newBuilder().setName(writeStreamName).build();</span>
+<span class="fc" id="L332">      FinalizeWriteStreamResponse finalizeResponse =</span>
+<span class="fc" id="L333">          retryFinalizeWriteStream(finalizeWriteStreamRequest);</span>
+
+<span class="fc" id="L335">      long expectedFinalizedRowCount = writeStreamRowCount;</span>
+<span class="fc" id="L336">      responseFinalizedRowCount = finalizeResponse.getRowCount();</span>
+<span class="pc bpc" id="L337" title="1 of 2 branches missed.">      if (responseFinalizedRowCount != expectedFinalizedRowCount) {</span>
+<span class="nc" id="L338">        throw new IOException(</span>
+<span class="nc" id="L339">            String.format(</span>
+                &quot;On stream %s finalization, expected finalized row count %d but received %d&quot;,
+<span class="nc" id="L341">                writeStreamName, expectedFinalizedRowCount, responseFinalizedRowCount));</span>
+      }
+    }
+
+<span class="fc" id="L345">    logger.debug(</span>
+        &quot;Write-stream {} with name {} finalized with row-count {}&quot;,
+<span class="fc" id="L347">        partitionId,</span>
+        writeStreamName,
+<span class="fc" id="L349">        responseFinalizedRowCount);</span>
+
+<span class="fc" id="L351">    clean();</span>
+
+<span class="fc" id="L353">    return new WriteStreamStatistics(responseFinalizedRowCount, responseFinalizedBytesWritten);</span>
+  }
+
+  /**
+   * A helper method in order to submit for retry (using method retryCallable) a callable that
+   * finalizes the write-stream; useful if finalization encountered a retriable error.
+   *
+   * @param finalizeWriteStreamRequest The request to send to the writeClient in order to finalize
+   *     the write-stream.
+   * @return The FinalizeWriteStreamResponse
+   * @see com.google.cloud.bigquery.storage.v1.FinalizeWriteStreamResponse
+   */
+  private FinalizeWriteStreamResponse retryFinalizeWriteStream(
+      FinalizeWriteStreamRequest finalizeWriteStreamRequest) {
+    try {
+<span class="fc" id="L368">      return retryCallable(() -&gt; writeClient.finalizeWriteStream(finalizeWriteStreamRequest));</span>
+<span class="nc" id="L369">    } catch (ExecutionException | InterruptedException e) {</span>
+<span class="nc" id="L370">      throw new BigQueryConnectorException(</span>
+<span class="nc" id="L371">          String.format(&quot;Could not finalize stream %s.&quot;, writeStreamName), e);</span>
+    }
+  }
+
+  /** Waits 500 milliseconds. In order to be used as a cushioning period before finalization. */
+  private void waitBeforeFinalization() {
+    try {
+<span class="fc" id="L378">      Sleeper.DEFAULT.sleep(500);</span>
+<span class="nc" id="L379">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L380">      throw new BigQueryConnectorException(</span>
+<span class="nc" id="L381">          String.format(</span>
+              &quot;Interrupted while sleeping before finalizing write-stream %s&quot;, writeStreamName),
+          e);
+<span class="fc" id="L384">    }</span>
+<span class="fc" id="L385">  }</span>
+
+  /**
+   * Deletes the data left over in the protoRows, using method clearProtoRows, closes the
+   * StreamWriter, shuts down the WriteClient, and nulls out the protoRows and write-stream-name.
+   * This also closes the internal StreamWriter, so that the helper instance is not * usable after
+   * calling &lt;code&gt;commit()&lt;/code&gt;.
+   */
+  public void abort() {
+<span class="fc" id="L394">    clean();</span>
+<span class="fc" id="L395">    this.protoRows = null;</span>
+<span class="fc" id="L396">    this.writeStreamName = null;</span>
+<span class="fc" id="L397">  }</span>
+
+  private void clean() {
+<span class="fc" id="L400">    clearProtoRows();</span>
+<span class="pc bpc" id="L401" title="1 of 2 branches missed.">    if (streamWriter != null) {</span>
+<span class="fc" id="L402">      streamWriter.close();</span>
+    }
+<span class="fc" id="L404">  }</span>
+
+  private void clearProtoRows() {
+<span class="pc bpc" id="L407" title="1 of 2 branches missed.">    if (this.protoRows != null) {</span>
+<span class="fc" id="L408">      this.protoRows.clear();</span>
+    }
+<span class="fc" id="L410">  }</span>
+
+  public String getWriteStreamName() {
+<span class="fc" id="L413">    return writeStreamName;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>StreamCombiningIterator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.bigquery.connector.common</a> &gt; <span class="el_source">StreamCombiningIterator.java</span></div><h1>StreamCombiningIterator.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2022 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.bigquery.connector.common;
+
+import com.google.api.gax.grpc.GrpcCallContext;
+import com.google.api.gax.rpc.ApiCallContext;
+import com.google.api.gax.rpc.ResponseObserver;
+import com.google.api.gax.rpc.StreamController;
+import com.google.cloud.bigquery.storage.v1.BigQueryReadClient;
+import com.google.cloud.bigquery.storage.v1.ReadRowsRequest;
+import com.google.cloud.bigquery.storage.v1.ReadRowsResponse;
+import com.google.common.base.Preconditions;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.util.concurrent.UncheckedExecutionException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * An iterator that combines one or more ReadRows requests into a single iterator. Ordering of
+ * messages is not guaranteed from the streams.
+ *
+ * &lt;p&gt;This is adapted from ServerStream in gax. In comparison toServerStream, this implementation
+ * also buffers more a configured number of responses instead of a single one. For connections with
+ * high latency between client and server this can processing costs. It also allows combining one or
+ * more ReadRows calls into single iterator to potentially increase perceived client throughput if
+ * that becomes a bottleneck for processing.
+ */
+public class StreamCombiningIterator implements Iterator&lt;ReadRowsResponse&gt; {
+<span class="fc" id="L54">  private static final Logger log = LoggerFactory.getLogger(StreamCombiningIterator.class);</span>
+<span class="fc" id="L55">  private static final Object EOS = new Object();</span>
+  // Contains either a ReadRowsResponse, or a terminal object of throwable OR EOS
+  // This class is engineered keep responses below capacity unless a terminal state has
+  // been reached.
+  private final ArrayBlockingQueue&lt;Object&gt; responses;
+  private final ArrayBlockingQueue&lt;Observer&gt; observersQueue;
+  private final AtomicInteger observersLeft;
+  private final int bufferEntriesPerStream;
+  private final int numRetries;
+<span class="fc" id="L64">  private final Object lock = new Object();</span>
+  private final BigQueryReadClient client;
+  Object last;
+<span class="fc" id="L67">  volatile boolean cancelled = false;</span>
+  private final Collection&lt;Observer&gt; observers;
+  private static final long IDENTITY_TOKEN_TTL_IN_MINUTES = 50;
+<span class="fc" id="L70">  private static final LoadingCache&lt;String, Optional&lt;String&gt;&gt; READ_SESSION_TO_IDENTITY_TOKEN_CACHE =</span>
+<span class="fc" id="L71">      CacheBuilder.newBuilder()</span>
+<span class="fc" id="L72">          .expireAfterWrite(IDENTITY_TOKEN_TTL_IN_MINUTES, TimeUnit.MINUTES)</span>
+<span class="fc" id="L73">          .build(CacheLoader.from(IdentityTokenSupplier::fetchIdentityToken));</span>
+
+  StreamCombiningIterator(
+      BigQueryReadClient client,
+      Collection&lt;ReadRowsRequest.Builder&gt; requests,
+      int bufferEntriesPerStream,
+<span class="fc" id="L79">      int numRetries) {</span>
+<span class="fc" id="L80">    this.client = client;</span>
+<span class="fc" id="L81">    observersLeft = new AtomicInteger(requests.size());</span>
+<span class="fc" id="L82">    this.bufferEntriesPerStream = bufferEntriesPerStream;</span>
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">    Preconditions.checkArgument(</span>
+        this.bufferEntriesPerStream &gt; 0,
+        &quot;bufferEntriesPerstream must be positive.  Received: %s&quot;,
+        this.bufferEntriesPerStream);
+<span class="pc bpc" id="L87" title="3 of 4 branches missed.">    if (this.bufferEntriesPerStream &gt; 0 || requests.size() &gt; 0) {</span>
+<span class="fc" id="L88">      log.info(</span>
+          &quot;new combining stream with {} streams and {} buffered entries&quot;,
+<span class="fc" id="L90">          requests.size(),</span>
+<span class="fc" id="L91">          this.bufferEntriesPerStream);</span>
+    }
+    // + 1 to leave space for terminal object.
+<span class="fc" id="L94">    responses = new ArrayBlockingQueue&lt;&gt;((requests.size() * this.bufferEntriesPerStream) + 1);</span>
+<span class="fc" id="L95">    observersQueue = new ArrayBlockingQueue&lt;&gt;(requests.size() * this.bufferEntriesPerStream);</span>
+<span class="fc" id="L96">    this.numRetries = numRetries;</span>
+<span class="fc" id="L97">    observers = requests.stream().map(Observer::new).collect(Collectors.toList());</span>
+<span class="fc" id="L98">  }</span>
+
+  synchronized void stopWithError(Throwable error) {
+<span class="fc" id="L101">    synchronized (lock) {</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">      if (cancelled) {</span>
+<span class="fc" id="L103">        return;</span>
+      }
+
+      try {
+<span class="nc" id="L107">        completeStream(/*addEos=*/ false);</span>
+      } finally {
+<span class="nc" id="L109">        Preconditions.checkState(</span>
+<span class="nc" id="L110">            responses.add(error), &quot;Responses should always have capacity to add element&quot;);</span>
+      }
+<span class="nc" id="L112">    }</span>
+<span class="nc" id="L113">  }</span>
+
+  private boolean hasActiveObservers() {
+<span class="pc bpc" id="L116" title="1 of 2 branches missed.">    return observersLeft.get() &gt; 0;</span>
+  }
+
+  /**
+   * Consumes the next response and asynchronously request the next response from the observer.
+   *
+   * @return The next response.
+   * @throws NoSuchElementException If the stream has been consumed or cancelled.
+   */
+  @Override
+  public ReadRowsResponse next() {
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">    if (!hasNext()) {</span>
+<span class="nc" id="L128">      throw new NoSuchElementException();</span>
+    }
+    try {
+<span class="fc" id="L131">      Observer observer = observersQueue.poll();</span>
+<span class="pc bpc" id="L132" title="1 of 2 branches missed.">      Preconditions.checkState(observer != null);</span>
+<span class="fc" id="L133">      observer.request();</span>
+      @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc" id="L135">      ReadRowsResponse tmp = (ReadRowsResponse) last;</span>
+<span class="fc" id="L136">      return tmp;</span>
+    } finally {
+<span class="pc bpc" id="L138" title="1 of 2 branches missed.">      if (last != EOS) {</span>
+<span class="fc" id="L139">        last = null;</span>
+      }
+    }
+  }
+
+  /**
+   * Checks if the stream has been fully consumed or cancelled. This method will block until the
+   * observer enqueues another event (response or completion event). If the observer encountered an
+   * error, this method will propagate the error and put itself into an error where it will always
+   * return the same error.
+   *
+   * @return true If iterator has more responses.
+   */
+  @Override
+  public boolean hasNext() {
+<span class="fc bfc" id="L154" title="All 2 branches covered.">    if (last == null) {</span>
+      try {
+<span class="fc" id="L156">        last = responses.take();</span>
+<span class="nc" id="L157">      } catch (InterruptedException e) {</span>
+<span class="nc" id="L158">        cancel();</span>
+<span class="nc" id="L159">        Thread.currentThread().interrupt();</span>
+<span class="nc" id="L160">        throw new RuntimeException(e);</span>
+<span class="fc" id="L161">      }</span>
+    }
+    // Preserve async error while keeping the caller's stacktrace as a suppressed exception
+<span class="pc bpc" id="L164" title="1 of 2 branches missed.">    if (last instanceof RuntimeException) {</span>
+<span class="nc" id="L165">      RuntimeException runtimeException = (RuntimeException) last;</span>
+<span class="nc" id="L166">      runtimeException.addSuppressed(new RuntimeException(&quot;Asynchronous task failed&quot;));</span>
+<span class="nc" id="L167">      throw runtimeException;</span>
+    }
+
+    // This should never really happen because currently gax doesn't throw checked exceptions.
+    // Wrap checked exceptions. This will preserve both the caller's stacktrace and the async error.
+<span class="pc bpc" id="L172" title="1 of 2 branches missed.">    if (last instanceof Throwable) {</span>
+<span class="nc" id="L173">      Throwable throwable = (Throwable) last;</span>
+<span class="nc" id="L174">      throw new UncheckedExecutionException(throwable);</span>
+    }
+
+<span class="fc bfc" id="L177" title="All 2 branches covered.">    return last != EOS;</span>
+  }
+
+  public void cancel() {
+<span class="fc" id="L181">    synchronized (lock) {</span>
+<span class="fc bfc" id="L182" title="All 2 branches covered.">      if (cancelled) {</span>
+<span class="fc" id="L183">        return;</span>
+      }
+<span class="fc" id="L185">      completeStream(/*addEos=*/ true);</span>
+<span class="fc" id="L186">    }</span>
+<span class="fc" id="L187">  }</span>
+
+  private void maybeFinished() {
+<span class="fc" id="L190">    synchronized (lock) {</span>
+<span class="pc bpc" id="L191" title="1 of 2 branches missed.">      if (cancelled) {</span>
+<span class="nc" id="L192">        return;</span>
+      }
+<span class="pc bpc" id="L194" title="1 of 2 branches missed.">      if (hasActiveObservers()) {</span>
+<span class="nc" id="L195">        return;</span>
+      }
+<span class="fc" id="L197">      completeStream(/*addEos=*/ true);</span>
+<span class="fc" id="L198">    }</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">    for (Observer observer : observers) {</span>
+<span class="fc" id="L200">      observer.cancel();</span>
+<span class="fc" id="L201">    }</span>
+<span class="fc" id="L202">  }</span>
+
+  private void completeStream(boolean addEos) {
+<span class="fc" id="L205">    cancelled = true;</span>
+<span class="fc" id="L206">    observersLeft.set(0);</span>
+    try {
+<span class="fc bfc" id="L208" title="All 2 branches covered.">      for (Observer observer : observers) {</span>
+<span class="fc" id="L209">        observer.cancel();</span>
+<span class="fc" id="L210">      }</span>
+    } finally {
+<span class="pc bpc" id="L212" title="1 of 2 branches missed.">      if (addEos) {</span>
+<span class="fc" id="L213">        responses.add(EOS);</span>
+      }
+    }
+<span class="fc" id="L216">  }</span>
+
+  private String parseReadSessionId(String stream) {
+<span class="fc" id="L219">    int streamsIndex = stream.indexOf(&quot;/streams&quot;);</span>
+<span class="pc bpc" id="L220" title="1 of 2 branches missed.">    if (streamsIndex != -1) {</span>
+<span class="fc" id="L221">      return stream.substring(0, streamsIndex);</span>
+    } else {
+<span class="nc" id="L223">      log.warn(&quot;Stream name {} in invalid format&quot;, stream);</span>
+<span class="nc" id="L224">      return stream;</span>
+    }
+  }
+
+  private void newConnection(Observer observer, ReadRowsRequest.Builder request) {
+<span class="fc" id="L229">    synchronized (lock) {</span>
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">      if (!cancelled) {</span>
+<span class="fc" id="L231">        ApiCallContext callContext = GrpcCallContext.createDefault();</span>
+        try {
+<span class="fc" id="L233">          callContext =</span>
+              READ_SESSION_TO_IDENTITY_TOKEN_CACHE
+<span class="fc" id="L235">                  .get(parseReadSessionId(request.getReadStream()))</span>
+<span class="fc" id="L236">                  .map(</span>
+                      token -&gt;
+<span class="fc" id="L238">                          GrpcCallContext.createDefault()</span>
+<span class="fc" id="L239">                              .withExtraHeaders(</span>
+<span class="fc" id="L240">                                  Collections.singletonMap(</span>
+                                      &quot;x-bigquerystorage-api-token&quot;,
+<span class="fc" id="L242">                                      Collections.singletonList(token))))</span>
+<span class="fc" id="L243">                  .orElse(GrpcCallContext.createDefault());</span>
+<span class="nc" id="L244">        } catch (ExecutionException e) {</span>
+<span class="nc" id="L245">          log.error(&quot;Unable to obtain identity token&quot;, e);</span>
+<span class="fc" id="L246">        }</span>
+<span class="fc" id="L247">        client.readRowsCallable().call(request.build(), observer, callContext);</span>
+      }
+<span class="fc" id="L249">    }</span>
+<span class="fc" id="L250">  }</span>
+
+  class Observer implements ResponseObserver&lt;ReadRowsResponse&gt; {
+    /* Offset into the stream that this is processing. */
+<span class="fc" id="L254">    private long readRowsCount = 0;</span>
+    /* Number of retries so far on this observer */
+<span class="fc" id="L256">    private int retries = 0;</span>
+    /**
+     * All methods accessing controller must be synchronized using controllerLock. The states of
+     * this object are: - Fresh object: null - Stream ready (receiving responses): not null -
+     * Retrying stream: null - Stream Finished: null
+     */
+    StreamController controller;
+    // Number of responses enqueued in the main iterator.
+<span class="fc" id="L264">    AtomicInteger enqueuedCount = new AtomicInteger(0);</span>
+<span class="fc" id="L265">    private final Object controllerLock = new Object();</span>
+
+    // The ReadRows request.  Uses a builder so offset can easily be set for retry.
+    ReadRowsRequest.Builder builder;
+
+<span class="fc" id="L270">    Observer(ReadRowsRequest.Builder builder) {</span>
+<span class="fc" id="L271">      this.builder = builder;</span>
+<span class="fc" id="L272">      newConnection(this, builder);</span>
+<span class="fc" id="L273">    }</span>
+
+    @Override
+    public void onResponse(ReadRowsResponse value) {
+<span class="fc" id="L277">      readRowsCount += value.getRowCount();</span>
+      // Note we don't take a global lock here, so ordering of observers might be different then
+      // responses.  This should be OK because it should balance out in the end (there should
+      // never be more then bufferResponses enquered from any given observer at any time).
+      // Ordering is important to ensure there is always an observer present for the given response.
+<span class="fc" id="L282">      Preconditions.checkState(observersQueue.add(this));</span>
+<span class="fc" id="L283">      Preconditions.checkState(responses.add(value), &quot;Expected capacity in responses&quot;);</span>
+<span class="fc" id="L284">    }</span>
+
+    @Override
+    public void onStart(StreamController controller) {
+<span class="fc" id="L288">      synchronized (StreamCombiningIterator.this.lock) {</span>
+<span class="pc bpc" id="L289" title="1 of 2 branches missed.">        if (cancelled) {</span>
+<span class="nc" id="L290">          controller.cancel();</span>
+<span class="nc" id="L291">          return;</span>
+        }
+<span class="fc" id="L293">        synchronized (controllerLock) {</span>
+<span class="fc" id="L294">          this.controller = controller;</span>
+<span class="fc" id="L295">          controller.disableAutoInboundFlowControl();</span>
+          // Regiest one more because request always decrements.
+<span class="fc" id="L297">          enqueuedCount.incrementAndGet();</span>
+<span class="fc" id="L298">          request();</span>
+<span class="fc" id="L299">        }</span>
+<span class="fc" id="L300">      }</span>
+<span class="fc" id="L301">    }</span>
+
+    @Override
+    public void onError(Throwable t) {
+      // if relevant, retry the read, from the last read position
+<span class="pc bpc" id="L306" title="3 of 4 branches missed.">      if (BigQueryUtil.isRetryable(t) &amp;&amp; retries &lt; numRetries) {</span>
+<span class="nc" id="L307">        synchronized (controllerLock) {</span>
+<span class="nc" id="L308">          controller = null;</span>
+<span class="nc" id="L309">        }</span>
+<span class="nc" id="L310">        builder.setOffset(readRowsCount);</span>
+<span class="nc" id="L311">        newConnection(this, builder);</span>
+<span class="nc" id="L312">        retries++;</span>
+      } else {
+<span class="pc bpc" id="L314" title="1 of 2 branches missed.">        if (BigQueryUtil.isReadSessionExpired(t)) {</span>
+<span class="nc" id="L315">          RuntimeException runtimeException =</span>
+              new RuntimeException(
+                  &quot;Read session expired after 6 hours. Dataframes on BigQuery tables cannot be &quot;
+                      + &quot;operated on beyond this time-limit. Your options: &quot;
+                      + &quot;(1) try finishing within 6 hours, &quot;
+                      + &quot;(2) use Spark dataframe caching, &quot;
+                      + &quot;(3) read from a newly created BigQuery dataframe.&quot;,
+                  t);
+<span class="nc" id="L323">          stopWithError(runtimeException);</span>
+<span class="nc" id="L324">        } else {</span>
+<span class="fc" id="L325">          stopWithError(t);</span>
+        }
+      }
+<span class="fc" id="L328">    }</span>
+
+    @Override
+    public void onComplete() {
+<span class="fc" id="L332">      synchronized (controllerLock) {</span>
+<span class="fc" id="L333">        controller = null;</span>
+<span class="fc" id="L334">      }</span>
+<span class="fc" id="L335">      int left = observersLeft.decrementAndGet();</span>
+<span class="fc" id="L336">      maybeFinished();</span>
+<span class="fc" id="L337">    }</span>
+
+    public synchronized void request() {
+
+<span class="fc bfc" id="L341" title="All 2 branches covered.">      if (cancelled) {</span>
+<span class="fc" id="L342">        return;</span>
+      }
+<span class="fc" id="L344">      boolean canExit = false;</span>
+<span class="fc" id="L345">      int count = enqueuedCount.decrementAndGet();</span>
+
+      // Division by is somewhat arbitrary, a better solution would instument
+      // timing and start refreshing just in time.
+<span class="pc bpc" id="L349" title="1 of 2 branches missed.">      if (count &gt; (bufferEntriesPerStream / 4)) {</span>
+        // Default netty/gRPC values can oversubscribe streams which can
+        // cause thread contention.  By waiting for the buffer to run down
+        // it causes natural thead back-pressure to allow application work
+        // to succeed.
+<span class="nc" id="L354">        return;</span>
+      }
+<span class="fc" id="L356">      int addBack = bufferEntriesPerStream - count;</span>
+<span class="pc bpc" id="L357" title="1 of 2 branches missed.">      Preconditions.checkState(addBack &gt; 0);</span>
+<span class="fc" id="L358">      enqueuedCount.addAndGet(addBack);</span>
+
+<span class="fc bfc" id="L360" title="All 2 branches covered.">      while (!canExit) {</span>
+
+<span class="fc" id="L362">        synchronized (controllerLock) {</span>
+<span class="pc bpc" id="L363" title="1 of 2 branches missed.">          if (controller == null) {</span>
+<span class="nc" id="L364">            return;</span>
+          }
+
+          // When not null there are a few cases to consider:
+          // 1.  Stream is active, so we want to request here.
+          // 2.  Stream is active but onError has been called and blocked on the lock.
+          //     In this case by decrementing above the new request should be taken care
+          //     after clearing and creating the new stream.
+          // 3.  The stream has no more messages.
+          // 4.  Stream is inactive (still initializing).
+          try {
+<span class="fc" id="L375">            controller.request(addBack);</span>
+<span class="fc" id="L376">            canExit = true;</span>
+<span class="nc" id="L377">          } catch (RuntimeException e) {</span>
+            // controller might not be started and javadoc isn't clear if it is on its path
+            // to shutdown on what should happen.
+<span class="nc" id="L380">            log.info(&quot;Exception on flow control request {} {}&quot;, e, builder.getReadStream());</span>
+<span class="fc" id="L381">          }</span>
+<span class="fc" id="L382">        }</span>
+      }
+<span class="fc" id="L384">    }</span>
+
+    public void cancel() {
+<span class="fc" id="L387">      synchronized (controllerLock) {</span>
+<span class="fc bfc" id="L388" title="All 2 branches covered.">        if (controller != null) {</span>
+          try {
+<span class="fc" id="L390">            controller.cancel();</span>
+<span class="nc" id="L391">          } catch (RuntimeException e) {</span>
+            // There could be edge cases here where controller is already cancelled or not yet
+            // read or something else is happening.  We don't want this to be fatal.
+<span class="fc" id="L394">          }</span>
+        }
+<span class="fc" id="L396">      }</span>
+<span class="fc" id="L397">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BigQueryDataSourceReaderModule.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-dsv2-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.v2.context</a> &gt; <span class="el_source">BigQueryDataSourceReaderModule.java</span></div><h1>BigQueryDataSourceReaderModule.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2021 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.v2.context;
+
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.bigquery.connector.common.BigQueryClientFactory;
+import com.google.cloud.bigquery.connector.common.BigQueryTracerFactory;
+import com.google.cloud.spark.bigquery.SparkBigQueryConfig;
+import com.google.inject.Binder;
+import com.google.inject.Module;
+import com.google.inject.Provides;
+import com.google.inject.Singleton;
+import java.util.Optional;
+import org.apache.spark.sql.SparkSession;
+
+public class BigQueryDataSourceReaderModule implements Module {
+
+  private Optional&lt;SparkBigQueryConfig&gt; tableScanConfig;
+
+  public BigQueryDataSourceReaderModule() {
+<span class="nc" id="L35">    this(Optional.empty());</span>
+<span class="nc" id="L36">  }</span>
+
+  // in practiced used only by the spark 3 connector, as there are separate phases for creating the
+  // catalog and the table scan (unlike DSv1 and spark 2.4)
+<span class="fc" id="L40">  public BigQueryDataSourceReaderModule(Optional&lt;SparkBigQueryConfig&gt; tableScanConfig) {</span>
+<span class="fc" id="L41">    this.tableScanConfig = tableScanConfig;</span>
+<span class="fc" id="L42">  }</span>
+
+  @Override
+  public void configure(Binder binder) {
+    // empty
+<span class="fc" id="L47">  }</span>
+
+  @Singleton
+  @Provides
+  public BigQueryDataSourceReaderContext provideDataSourceReaderContext(
+      BigQueryClient bigQueryClient,
+      BigQueryClientFactory bigQueryReadClientFactory,
+      BigQueryTracerFactory tracerFactory,
+      SparkBigQueryConfig globalConfig,
+      SparkSession sparkSession) {
+<span class="fc" id="L57">    SparkBigQueryConfig config = tableScanConfig.orElse(globalConfig);</span>
+<span class="fc" id="L58">    TableInfo tableInfo = bigQueryClient.getReadTable(config.toReadTableOptions());</span>
+<span class="fc" id="L59">    return new BigQueryDataSourceReaderContext(</span>
+        tableInfo,
+        bigQueryClient,
+        bigQueryReadClientFactory,
+        tracerFactory,
+<span class="fc" id="L64">        config.toReadSessionCreatorConfig(),</span>
+<span class="fc" id="L65">        config.getFilter(),</span>
+<span class="fc" id="L66">        config.getSchema(),</span>
+<span class="fc" id="L67">        sparkSession.sparkContext().applicationId(),</span>
+        config,
+<span class="fc" id="L69">        sparkSession.sqlContext(),</span>
+        sparkSession,
+<span class="fc" id="L71">        config.toReadTableOptions());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>

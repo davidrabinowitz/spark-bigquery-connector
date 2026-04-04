@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DataSourceWriterContext.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">Coverage Report</a> &gt; <a href="../index.html" class="el_bundle">spark-bigquery-connector-common</a> &gt; <a href="index.source.html" class="el_package">com.google.cloud.spark.bigquery.write.context</a> &gt; <span class="el_source">DataSourceWriterContext.java</span></div><h1>DataSourceWriterContext.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2021 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *       https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.cloud.spark.bigquery.write.context;
+
+import com.google.cloud.bigquery.JobInfo;
+import com.google.cloud.bigquery.TableId;
+import com.google.cloud.bigquery.TableInfo;
+import com.google.cloud.bigquery.connector.common.BigQueryClient;
+import com.google.cloud.bigquery.connector.common.BigQueryUtil;
+import com.google.cloud.spark.bigquery.DataSourceVersion;
+import com.google.cloud.spark.bigquery.SparkBigQueryConfig;
+import com.google.common.collect.ImmutableMap;
+import com.google.inject.Injector;
+import java.util.Map;
+import java.util.Optional;
+import org.apache.spark.sql.SaveMode;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.types.StructType;
+
+public interface DataSourceWriterContext {
+
+  DataWriterContextFactory&lt;InternalRow&gt; createWriterContextFactory();
+
+  default boolean useCommitCoordinator() {
+<span class="nc" id="L39">    return true;</span>
+  }
+
+<span class="nc" id="L42">  default void onDataWriterCommit(WriterCommitMessageContext message) {}</span>
+
+<span class="nc" id="L44">  default void onDataStreamingWriterCommit(long epochId, WriterCommitMessageContext[] messages) {}</span>
+
+<span class="nc" id="L46">  default void onDataStreamingWriterAbort(long epochId, WriterCommitMessageContext[] messages) {}</span>
+
+  void commit(WriterCommitMessageContext[] messages);
+
+  void abort(WriterCommitMessageContext[] messages);
+
+  void setTableInfo(TableInfo tableInfo);
+
+  static Optional&lt;DataSourceWriterContext&gt; create(
+      Injector injector,
+      String writeUUID,
+      StructType schema,
+      SaveMode mode,
+      Map&lt;String, String&gt; options) {
+<span class="fc" id="L60">    SparkBigQueryConfig tableConfig = injector.getInstance(SparkBigQueryConfig.class);</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">    if (tableConfig.getTableId() == null) {</span>
+      // the config was created for the catalog, we need to parse the tableId from the options
+<span class="nc" id="L63">      SparkSession spark = injector.getInstance(SparkSession.class);</span>
+<span class="nc" id="L64">      tableConfig =</span>
+<span class="nc" id="L65">          SparkBigQueryConfig.from(</span>
+              options,
+<span class="nc" id="L67">              ImmutableMap.of(),</span>
+              DataSourceVersion.V2,
+              spark,
+<span class="nc" id="L70">              Optional.of(schema),</span>
+              true /* tableIsMandatory */);
+    }
+<span class="fc" id="L73">    Injector writerInjector =</span>
+<span class="fc" id="L74">        injector.createChildInjector(</span>
+            new BigQueryDataSourceWriterModule(tableConfig, writeUUID, schema, mode));
+    // first verify if we need to do anything at all, based on the table existence and the save
+    // mode.
+<span class="fc" id="L78">    BigQueryClient bigQueryClient = writerInjector.getInstance(BigQueryClient.class);</span>
+<span class="fc" id="L79">    TableId tableId = tableConfig.getTableId();</span>
+<span class="fc" id="L80">    TableInfo table = bigQueryClient.getTable(tableId);</span>
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">    if (table != null) {</span>
+      // table already exists
+<span class="nc bnc" id="L83" title="All 2 branches missed.">      if (mode == SaveMode.Ignore) {</span>
+<span class="nc" id="L84">        return Optional.empty();</span>
+      }
+<span class="nc bnc" id="L86" title="All 2 branches missed.">      if (mode == SaveMode.ErrorIfExists) {</span>
+<span class="nc" id="L87">        throw new IllegalArgumentException(</span>
+<span class="nc" id="L88">            String.format(</span>
+                &quot;SaveMode is set to ErrorIfExists and table '%s' already exists. Did you want &quot;
+                    + &quot;to add data to the table by setting the SaveMode to Append? Example: &quot;
+                    + &quot;df.write.format.options.mode(\&quot;append\&quot;).save()&quot;,
+<span class="nc" id="L92">                BigQueryUtil.friendlyTableName(table.getTableId())));</span>
+      }
+    } else {
+      // table does not exist
+      // If the CreateDisposition is CREATE_NEVER, and the table does not exist,
+      // there's no point in writing the data to GCS in the first place as it going
+      // to fail on the BigQuery side.
+<span class="fc" id="L99">      boolean createNever =</span>
+          tableConfig
+<span class="fc" id="L101">              .getCreateDisposition()</span>
+<span class="pc bnc" id="L102" title="All 2 branches missed.">              .map(createDisposition -&gt; createDisposition == JobInfo.CreateDisposition.CREATE_NEVER)</span>
+<span class="fc" id="L103">              .orElse(false);</span>
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">      if (createNever) {</span>
+<span class="nc" id="L105">        throw new IllegalArgumentException(</span>
+<span class="nc" id="L106">            String.format(</span>
+                &quot;For table %s Create Disposition is CREATE_NEVER and the table does not exists.&quot;
+                    + &quot; Aborting the insert&quot;,
+<span class="nc" id="L109">                BigQueryUtil.friendlyTableName(tableId)));</span>
+      }
+    }
+<span class="fc" id="L112">    DataSourceWriterContext dataSourceWriterContext = null;</span>
+<span class="pc bpc" id="L113" title="2 of 3 branches missed.">    switch (tableConfig.getWriteMethod()) {</span>
+      case DIRECT:
+<span class="nc" id="L115">        dataSourceWriterContext =</span>
+<span class="nc" id="L116">            writerInjector.getInstance(BigQueryDirectDataSourceWriterContext.class);</span>
+<span class="nc" id="L117">        break;</span>
+      case INDIRECT:
+<span class="fc" id="L119">        dataSourceWriterContext =</span>
+<span class="fc" id="L120">            writerInjector.getInstance(BigQueryIndirectDataSourceWriterContext.class);</span>
+        break;
+    }
+<span class="fc" id="L123">    dataSourceWriterContext.setTableInfo(table);</span>
+<span class="fc" id="L124">    return Optional.of(dataSourceWriterContext);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>
