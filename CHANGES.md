@@ -2,6 +2,9 @@
 
 ## Next
 
+* BigQuery API has been upgraded to version 2.66.0
+* BigQuery Storage API has been upgraded to version 3.28.0
+
 ## 0.44.2 - 2026-05-20
 
 * Issue #1389: Fixed Timestamp Conversion from Julian to Gregorian conversion
