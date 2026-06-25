@@ -88,6 +88,8 @@ public class BigQueryUtil {
   public static final int DEFAULT_NUMERIC_SCALE = 9;
   public static final int DEFAULT_BIG_NUMERIC_PRECISION = 76;
   public static final int DEFAULT_BIG_NUMERIC_SCALE = 38;
+  public static final ImmutableSet<String> CDC_PSEUDO_COLUMNS =
+      ImmutableSet.of("_CHANGE_TYPE", "_CHANGE_SEQUENCE_NUMBER");
   private static final int NO_VALUE = -1;
   private static final long BIGQUERY_INTEGER_MIN_VALUE = Long.MIN_VALUE;
   static final ImmutableSet<String> INTERNAL_ERROR_MESSAGES =
@@ -1177,5 +1179,9 @@ public class BigQueryUtil {
       return "NULL";
     }
     return String.valueOf(fieldValue.getValue());
+  }
+
+  public static boolean isCdcPseudoColumn(Field field) {
+    return BigQueryUtil.CDC_PSEUDO_COLUMNS.contains(field.getName().toUpperCase(Locale.ENGLISH));
   }
 }
