@@ -4001,4 +4001,249 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
   static <T> Predicate<T> not(Predicate<T> predicate) {
     return predicate.negate();
   }
+
+  protected static JsonObject cdcSuccessApp(
+      String testDataset, String testTable, Map<String, String> parameters) throws Exception {
+    String destTableName = testDataset + "." + testTable;
+    SparkSession spark =
+        IntegrationTestUtils.createSparkSessionBuilder("cdc_success_app")
+            .config("spark.ui.enabled", "false")
+            .config("enableListInference", "true")
+            .getOrCreate()
+            .newSession();
+
+    StructType schema =
+        new StructType()
+            .add("id", DataTypes.LongType)
+            .add("name", DataTypes.StringType)
+            .add("_change_type", DataTypes.StringType);
+
+    List<Row> rows =
+        Arrays.asList(
+            RowFactory.create(1L, "foo", "UPSERT"), RowFactory.create(2L, "bar", "UPSERT"));
+    Dataset<Row> df = spark.createDataFrame(rows, schema);
+
+    df.write()
+        .format("bigquery")
+        .mode(SaveMode.Append)
+        .option("writeMethod", "direct")
+        .option("writeAtLeastOnce", "true")
+        .save(destTableName);
+
+    List<Row> rows2 = Arrays.asList(RowFactory.create(1L, "foo", "DELETE"));
+    Dataset<Row> df2 = spark.createDataFrame(rows2, schema);
+    df2.write()
+        .format("bigquery")
+        .mode(SaveMode.Append)
+        .option("writeMethod", "direct")
+        .option("writeAtLeastOnce", "true")
+        .save(destTableName);
+
+    JsonObject result = new JsonObject();
+    result.addProperty("status", "success");
+    return result;
+  }
+
+  protected static JsonObject cdcFailureApp(
+      String testDataset, String testTable, Map<String, String> parameters) throws Exception {
+    String scenario = parameters.get("scenario");
+    String saveModeStr = parameters.getOrDefault("saveMode", "Append");
+    String writeMethod = parameters.getOrDefault("writeMethod", "direct");
+    String writeAtLeastOnce = parameters.getOrDefault("writeAtLeastOnce", "true");
+    String changeType = parameters.getOrDefault("changeType", "UPSERT");
+    String destTableName =
+        testDataset + "." + testTable + parameters.getOrDefault("tableDecorator", "");
+
+    SparkSession spark =
+        IntegrationTestUtils.createSparkSessionBuilder("cdc_failure_app")
+            .config("spark.ui.enabled", "false")
+            .config("enableListInference", "true")
+            .getOrCreate()
+            .newSession();
+
+    StructType schema;
+    Dataset<Row> df;
+    if ("CDC_FAIL_PARTITION_DECORATOR".equals(scenario)) {
+      schema =
+          new StructType()
+              .add("id", DataTypes.LongType)
+              .add("name", DataTypes.StringType)
+              .add("partition_date", DataTypes.DateType)
+              .add("_CHANGE_TYPE", DataTypes.StringType);
+      df =
+          spark.createDataFrame(
+              Collections.singletonList(
+                  RowFactory.create(1L, "foo", java.sql.Date.valueOf("2023-01-01"), changeType)),
+              schema);
+    } else {
+      schema =
+          new StructType().add("id", DataTypes.LongType).add("_CHANGE_TYPE", DataTypes.StringType);
+      df =
+          spark.createDataFrame(
+              Collections.singletonList(RowFactory.create(1L, changeType)), schema);
+    }
+
+    try {
+      df.write()
+          .format("bigquery")
+          .mode(SaveMode.valueOf(saveModeStr))
+          .option("writeMethod", writeMethod)
+          .option("writeAtLeastOnce", writeAtLeastOnce)
+          .option("temporaryGcsBucket", TestConstants.TEMPORARY_GCS_BUCKET)
+          .save(destTableName);
+
+      JsonObject result = new JsonObject();
+      result.addProperty("status", "success");
+      return result;
+    } catch (Exception e) {
+      JsonObject result = new JsonObject();
+      result.addProperty("status", "failure");
+      StringBuilder errorMsg = new StringBuilder();
+      Throwable t = e;
+      while (t != null) {
+        errorMsg.append(t.getMessage()).append(" | ");
+        t = t.getCause();
+      }
+      result.addProperty("error", errorMsg.toString());
+      return result;
+    }
+  }
+
+  @Test
+  public void testCdcAppend() throws Exception {
+    assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
+
+    String destTableName = testDataset + "." + testTable;
+    String ddl =
+        String.format(
+            "CREATE TABLE %s (id INT64, name STRING, PRIMARY KEY(id) NOT ENFORCED)", destTableName);
+    IntegrationTestUtils.runQuery(ddl);
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcSuccessApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of());
+    assertThat(result.get("status").getAsString()).isEqualTo("success");
+
+    int numOfRows = testTableNumberOfRows(testTable);
+    assertThat(numOfRows).isEqualTo(1);
+  }
+
+  @Test
+  public void testCdcFailsWhenIndirectWriteMethod() {
+    assumeThat(writeMethod, equalTo(WriteMethod.INDIRECT));
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcFailureApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of("scenario", "CDC_FAIL_INDIRECT", "writeMethod", "indirect"));
+
+    assertThat(result.get("status").getAsString()).isEqualTo("failure");
+    assertThat(result.get("error").getAsString())
+        .contains("CDC is only supported when writeMethod is DIRECT and writeAtLeastOnce is true");
+  }
+
+  @Test
+  public void testCdcFailsWhenDirectButNotAtLeastOnce() {
+    assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcFailureApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of("scenario", "CDC_FAIL_NOT_AT_LEAST_ONCE", "writeAtLeastOnce", "false"));
+
+    assertThat(result.get("status").getAsString()).isEqualTo("failure");
+    assertThat(result.get("error").getAsString())
+        .contains("CDC is only supported when writeMethod is DIRECT and writeAtLeastOnce is true");
+  }
+
+  @Test
+  public void testCdcFailsWhenTableDoesNotExist() {
+    assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcFailureApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of("scenario", "CDC_FAIL_TABLE_DOES_NOT_EXIST"));
+
+    assertThat(result.get("status").getAsString()).isEqualTo("failure");
+    assertThat(result.get("error").getAsString())
+        .contains("CDC can only be written to an existing table");
+  }
+
+  @Test
+  public void testCdcFailsWithPartitionDecorator() throws Exception {
+    assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
+
+    String baseTableName = testDataset + "." + testTable;
+    String ddl =
+        String.format(
+            "CREATE TABLE %s (id INT64, name STRING, partition_date DATE, PRIMARY KEY(id) NOT ENFORCED) PARTITION BY partition_date",
+            baseTableName);
+    IntegrationTestUtils.runQuery(ddl);
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcFailureApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of(
+                "scenario", "CDC_FAIL_PARTITION_DECORATOR", "tableDecorator", "$20230101"));
+
+    assertThat(result.get("status").getAsString()).isEqualTo("failure");
+    assertThat(result.get("error").getAsString())
+        .contains("CDC cannot be used with a partition decorator ($). Write to the base table.");
+  }
+
+  @Test
+  public void testCdcFailsWithInvalidChangeType() throws Exception {
+    assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
+
+    String destTableName = testDataset + "." + testTable;
+    String ddl =
+        String.format(
+            "CREATE TABLE %s (id INT64, name STRING, PRIMARY KEY(id) NOT ENFORCED)", destTableName);
+    IntegrationTestUtils.runQuery(ddl);
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcFailureApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of("scenario", "CDC_FAIL_INVALID_CHANGE_TYPE", "changeType", "INSERT"));
+
+    assertThat(result.get("status").getAsString()).isEqualTo("failure");
+    assertThat(result.get("error").getAsString())
+        .contains("CDC _CHANGE_TYPE must be UPSERT or DELETE");
+  }
+
+  @Test
+  public void testCdcFailsWithOverwrite() throws Exception {
+    assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
+
+    String destTableName = testDataset + "." + testTable;
+    String ddl =
+        String.format(
+            "CREATE TABLE %s (id INT64, name STRING, PRIMARY KEY(id) NOT ENFORCED)", destTableName);
+    IntegrationTestUtils.runQuery(ddl);
+
+    JsonObject result =
+        testRunner.run(
+            WriteIntegrationTestBase::cdcFailureApp,
+            testDataset.toString(),
+            testTable,
+            ImmutableMap.of("scenario", "CDC_FAIL_OVERWRITE", "saveMode", "Overwrite"));
+
+    assertThat(result.get("status").getAsString()).isEqualTo("failure");
+    assertThat(result.get("error").getAsString())
+        .contains("CDC can only be used with SaveMode.Append");
+  }
 }
