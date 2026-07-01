@@ -132,9 +132,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("basic_write_test")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     try {
       Person p1 =
@@ -298,9 +298,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("schema_diff_write_test")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     try {
       if ("DIFF_SCHEMA".equals(scenario)) {
@@ -690,9 +690,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("partition_clustered_write_test")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     try {
       if ("PARTITION_CLUSTERED".equals(scenario)) {
@@ -932,9 +932,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("date_time_write_test")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     try {
       if ("JSON_NEW".equals(scenario) || "JSON_EXISTING".equals(scenario)) {
@@ -1130,9 +1130,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("ml_write_test")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     try {
       Dataset<Row> df =
@@ -4008,9 +4008,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("cdc_success_app")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     StructType schema =
         new StructType()
@@ -4057,9 +4057,9 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     SparkSession spark =
         IntegrationTestUtils.createSparkSessionBuilder("cdc_failure_app")
             .config("spark.ui.enabled", "false")
-            .config("enableListInference", "true")
             .getOrCreate()
             .newSession();
+    spark.conf().set("enableListInference", "true");
 
     StructType schema;
     Dataset<Row> df;
@@ -4132,7 +4132,7 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
   }
 
   @Test
-  public void testCdcFailsWhenIndirectWriteMethod() {
+  public void testCdcFailsWhenIndirectWriteMethod() throws Exception {
     assumeThat(writeMethod, equalTo(WriteMethod.INDIRECT));
 
     JsonObject result =
@@ -4148,7 +4148,7 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
   }
 
   @Test
-  public void testCdcFailsWhenDirectButNotAtLeastOnce() {
+  public void testCdcFailsWhenDirectButNotAtLeastOnce() throws Exception {
     assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
 
     JsonObject result =
@@ -4164,7 +4164,7 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
   }
 
   @Test
-  public void testCdcFailsWhenTableDoesNotExist() {
+  public void testCdcFailsWhenTableDoesNotExist() throws Exception {
     assumeThat(writeMethod, equalTo(WriteMethod.DIRECT));
 
     JsonObject result =
