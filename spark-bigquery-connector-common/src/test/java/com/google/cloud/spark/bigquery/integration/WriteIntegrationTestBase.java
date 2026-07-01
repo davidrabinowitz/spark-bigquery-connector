@@ -115,6 +115,7 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     if (sparkSession == null) {
       sparkSession =
           IntegrationTestUtils.createSparkSessionBuilder("WriteTest").getOrCreate().newSession();
+      sparkSession.conf().set("enableListInference", "true");
     }
     return sparkSession;
   }
